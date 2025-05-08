@@ -1,0 +1,895 @@
+
+
+================================================================================
+2025-05-04 13:49:27,477 - INFO
+================================================================================
+Logging started. Log file: logs/agent_log_20250504_134927.log
+
+
+================================================================================
+2025-05-04 13:49:27,554 - INFO
+================================================================================
+PROMPT: Initial Analysis (user)
+
+You will be provided a summary of a research paper as well as a set of computational analyses that were previously attempted for the given single-cell transcriptomic Andata dataset.
+Your role is to provide a new computational analysis plan that is completely distinct from the analyses in the paper AND from those that were previously attempted.
+Specifically, you will return a hypothesis, a series of analysis steps towards testing that hypothesis, and finally the python code for executing the first analysis step.
+
+Ensure that your output is in the specified JSON format.
+
+Guidelines for constructing the analyses:
+    1. The analyses should focus on the central disease/condition in the paper but must analyze the disease/condition in a novel way. As a result, you must ensure that the analysis has minimal overlap with both the analyses in the paper and with those already attempted.
+    2. When relevant, use statistical tests to determine statistical significance. Ensure that you are printing the results of these
+    3. When relevant, create figures of your results. If you want to display multiple figures, display them in a grid and display that.
+    4. For analyses that depend on celltype, look at each celltype separately. Focus on the celltypes that you think will be most relevant.
+    5. For suggesting novel analyses not present in the paper, focus on using new computational methods, looking at new celltypes/genes/features, and finding new ways to visualize the dataset.
+    6. Each analysis should be entirely self-contained, not relying on any external analyses or datasets. It should be able to be run without changing anything.
+    7. You can only use the following Python packages: scanpy, scvi-tools, scVelo, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy. DO NOT USE ANY OTHER PACKAGES.
+    8. Make sure to only use data found in the anndata object. Take advantage of as much of the metadata information as possible.
+    9. The path to the anndata object is /scratch/users/salber/Single_cell_atlas_of_peripheral_immune_response_to_SARS_CoV_2_infection.h5ad
+    10. If trying to use scVelo, insert the following code snippet BEFORE the "import scvelo" statement:
+    import matplotlib
+    class mplDeprecation(UserWarning):
+        pass
+    matplotlib.cbook.mplDeprecation = mplDeprecation
+    11. The analysis should be focused on one core goal/hypothesis. It should not branch out from this significantly. 
+    12. DO NOT LOAD THE anndata file, it is already in memory (access it with the variable name adata)
+
+
+
+For the analysis plan, think of the analysis plan as a scientific workflow:
+    1. Start with exploratory data analysis that is broad and tests many things
+    2. Then, focus on the more promising results from the exploratory phase by creating more focused analyses
+    3. Include statistical validation of your results where appropiate
+Do not number the analysis plan.
+Each step in the analysis plan should be distinct from one another and could involve loading the data, conducting a statistical analysis, printing information about the AnnData object, etc.
+Use however many steps is appropiate, but go for at least 5 steps. 
+
+You are given the following summary of the anndata object:
+Below is a description of the columns in adata.obs: 
+Column Admission contains the values [0 1 2] 
+Column ClusterID contains the values [0 1 2 3 4 5 6 7 8 9] 
+Column DPS contains the values [ 0  2  9 11 12 15 16] 
+Column DTF contains the values [ 0  1  9 11 16] 
+Column Donor_full contains the values [0 1 2 3 4 5 6 7 8 9] 
+Column HLA1 contains the values [-0.25744796 -0.249229   -0.24233663 -0.24096534 -0.2393411  -0.23883513
+ -0.23800395 -0.23798658 -0.23763052 -0.23738778] 
+Column IFN1 contains the values [-0.0995561  -0.08593454 -0.07443827 -0.07209909 -0.06772828 -0.06687259
+ -0.0659527  -0.06449838 -0.06365878 -0.06166404] 
+Column Sex contains the values [0 1] 
+Column Status contains the values [0 1] 
+Column Ventilated contains the values [0 1 2] 
+Column cell_type_coarse contains the values [0 1 2 3 4 5 6 7 8 9] 
+Column cell_type_fine contains the values [0 1 2 3 4 5 6 7 8 9] 
+Column nCount_RNA contains the values [ 995.  996.  997.  998.  999. 1000. 1001. 1002. 1003. 1004.] 
+Column nCount_SCT contains the values [1335. 1366. 1371. 1375. 1383. 1384. 1387. 1388. 1389. 1391.] 
+Column nFeature_RNA contains the values [ 89  90  93  94  95  96  97  98  99 100] 
+Column nFeature_SCT contains the values [89 90 91 92 94 95 96 97 98 99] 
+Column percent_mt contains the values [0.         0.0245098  0.0296824  0.03051572 0.03119152 0.03132832
+ 0.03419973 0.03793627 0.04142502 0.0435161 ] 
+Column percent_rpl contains the values [0.         0.01192748 0.01460494 0.01659476 0.01772735 0.01899696
+ 0.02033347 0.02065689 0.02144082 0.02251238] 
+Column percent_rps contains the values [0.         0.02033347 0.02065689 0.020803   0.02206045 0.0224165
+ 0.02251238 0.02258356 0.02335357 0.02385496] 
+Column percent_rrna contains the values [0.2570694  0.7496252  0.77030814 0.9009009  0.90909094 0.9129641
+ 0.9811321  0.9861933  1.0085337  1.0125074 ] 
+Column seurat_clusters contains the values [0 1 2 3 4 5 6 7 8 9] 
+Column singler contains the values [0 1 2 3 4 5 6 7 8 9] 
+
+
+Here are the previous analyses attempted:
+
+
+Here is a summary of the research paper:
+Biological background  
+The paper focuses on severe COVID-19, a condition induced by SARS‑CoV‑2 infection that, in a subset of patients, progresses to acute respiratory distress syndrome (ARDS) requiring intensive care. Given the high morbidity and mortality associated with severe disease, understanding the underlying immune responses is crucial. The study investigates how the peripheral immune compartment, particularly within the blood, responds during severe COVID-19 and the potential mechanisms that could both drive immunopathology and contribute to protective immunity.
+
+Biological background  
+Key biological questions addressed include how different immune cell subsets are reconfigured during severe COVID-19, the role of specific cells in processes like cytokine release syndrome, and whether peripheral immune cells contribute to the cytokine storm widely feared in these patients. The authors also evaluate the extent of interferon-driven gene expression and the dysregulation of antigen presentation molecules (e.g. HLA class II), alongside the emergence of unusual cell populations such as developing neutrophils, to provide a comprehensive view of the immune alterations in severe cases.
+
+Paper’s computational analyses  
+The first computational workflow involved processing Seq-Well scRNA‑seq data from 44,721 cells isolated from peripheral blood mononuclear cells of patients and controls. Using the Seurat package, the authors performed data scaling, transformation, and variable gene identification via SCTransform(). Dimensionality reduction through PCA followed by UMAP embedding and graph‑based clustering (using the Louvain method) resulted in the identification of 30 clusters corresponding to diverse immune cell types. Differential expression (DE) analysis using the Wilcoxon rank‑sum test allowed manual annotation of these clusters according to known immune markers. This preliminary analysis revealed significant phenotypic differences between COVID‑19 patients and healthy individuals, particularly among monocytes, T cells, and natural killer (NK) cells.
+
+Paper’s computational analyses  
+A series of focused analyses on cell type proportions was then conducted; the authors quantified changes in immune cell subset frequencies between COVID‑19 and control samples. They found that several innate immune subsets—including γδ T cells, plasmacytoid and conventional dendritic cells, CD16+ monocytes, and some NK cell populations—were substantially depleted, especially in patients with ARDS. Conversely, plasmablast proportions were increased, particularly in more severe cases, suggesting a robust humoral response. In addition, a novel “developing neutrophil” population was identified that expressed neutrophil granule protein genes (e.g., ELANE, LTF, MMP8) but lacked canonical neutrophil surface markers, hinting at a differentiation continuum potentially linked to emergency granulopoiesis.
+
+Paper’s computational analyses  
+The authors then performed in-depth analyses on specific immune compartments. For monocytes, UMAP‐based subclustering distinguished CD14+ and CD16+ subsets, revealing a strong phenotypic shift where CD14+ monocytes dominated while CD16+ were depleted. DE analysis in monocytes indicated little to no expression of pro‑inflammatory cytokine genes such as TNF, IL6, or IL1B, opposing the notion that peripheral monocytes drive the cytokine storm. Instead, a remarkable downregulation of HLA class II genes was noted—more pronounced in ventilated patients—and an interferon‑stimulated gene (ISG) signature was variably present, with regulatory analysis suggesting differential IFN and IRF activity across patients. In parallel, analyses of T and NK cells via UMAP identified distinct populations (CD4+ T, CD8+ T and NK cells) with further DE and pathway‐enrichment analyses showing depletion of specific NK subsets (CD56dim, CD56bright) and an inconclusive evidence of T cell exhaustion. Additionally, a focused RNA velocity analysis on plasmablasts and developing neutrophils revealed a differentiation bridge: cells transitioned from an Ig gene‑expressing plasmablast state to progressively express neutrophil granule proteins, with transcription factors (CEBPE and CEBPD) marking this continuum. This trajectory analysis suggests potential cellular transdifferentiation events in severe COVID‑19 with ARDS.
+
+Paper’s dataset description  
+The dataset comprises single‑cell transcriptomic data obtained from 44,721 cells derived from eight peripheral blood samples collected from seven hospitalized COVID‑19 patients (ranging in age and clinical presentation, including patients with and without ARDS) as well as six healthy control donors. Each sample includes detailed metadata such as donor demographics, time post–symptom onset, ventilation status, and treatment history (e.g., administration of azithromycin or remdesivir), which provides context to the observed cellular phenotypes. In addition to high‑quality scRNA‑seq measurements (including UMIs, gene counts, and quality metrics like mitochondrial and rRNA read percentages), the dataset incorporates downstream DE gene lists, pathway enrichment analyses, upstream regulator predictions, and RNA velocity trajectories. Together, this intricate dataset connects transcriptional dynamics of peripheral immune cells to the pathogenesis and progression of severe COVID‑19, offering a rich resource for dissecting disease immunology and guiding therapeutic strategies.
+In severe COVID‐19 patients, dysregulated cell–cell communication mediated by key inflammatory ligand–receptor pairs drives altered interactions between specific immune cell types. In particular, we hypothesize that interactions between monocytes (as major producers of inflammatory ligands) and T cells (as recipients via corresponding receptors) are enhanced in severe COVID‐19 compared to healthy controls. Detecting such changes may help identify communication pathways that contribute to immunopathology.
+In severe COVID‐19 patients, we hypothesize that monocytes upregulate inflammatory ligands (e.g., TNF, IL1B, IL6) and T cells simultaneously increase expression of the corresponding receptors (e.g., TNFRSF1A, IL1R1, IL6R). This enhanced expression is expected to boost the communication signaling between monocytes and T cells compared to healthy controls. Such dysregulated communication may contribute to immunopathology in severe COVID‐19.
+
+
+================================================================================
+2025-05-04 13:50:06,908 - INFO
+================================================================================
+RESPONSE/OUTPUT: initial_analysis
+
+Hypothesis: Severe COVID‐19 disrupts the normal co‐regulation between the interferon response and antigen presentation machinery. In particular, we hypothesize that the correlation between IFN1 (an indicator of interferon‐stimulated gene expression) and HLA1 (a proxy for antigen presentation capacity) is significantly altered in COVID‐19 patients (Status = 1) compared to healthy controls (Status = 0) across various immune subtypes. This dysregulation, observable via shifts in the gene–gene co-expression networks, may reflect underlying immune signaling perturbations contributing to disease severity.
+
+Analysis Plan:
+1. Extract the relevant metadata from the anndata object. We will focus on the columns 'Status', 'cell_type_coarse', 'IFN1', and 'HLA1'.
+2. Perform an exploratory global correlation analysis between IFN1 and HLA1 across all cells. Compute Spearman correlation and its significance to assess if these two markers are generally coordinated in the dataset.
+3. Stratify the data by disease status (Status = 0 for healthy controls and Status = 1 for severe COVID‐19 patients) and by each immune cell subtype defined in 'cell_type_coarse'. For each subgroup, compute the Spearman correlation between IFN1 and HLA1 and record the correlation coefficient and p‐value.
+4. Generate scatter plots with regression lines to visually compare the IFN1 versus HLA1 relationship. Arrange these plots in a grid where rows correspond to different cell types (from cell_type_coarse) and columns represent the two clinical statuses. This will help in visualizing whether severe COVID‐19 alters the co-expression network within specific immune compartments.
+5. Perform statistical comparisons of the correlation coefficients between the two status groups—for example, using a Fisher transformation if appropriate—to determine if the differences in correlation patterns are significant.
+6. Summarize the results to assess whether the altered correlation between interferon signaling and antigen presentation is consistent with dysregulated immune communication in severe COVID‐19.
+
+Initial Code:
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import spearmanr
+
+# Extract the relevant metadata from the anndata object
+meta_df = adata.obs[['Status', 'cell_type_coarse', 'IFN1', 'HLA1']].copy()
+
+# Compute global Spearman correlation between IFN1 and HLA1 across all cells
+rho_global, pval_global = spearmanr(meta_df['IFN1'], meta_df['HLA1'])
+print('Global Spearman correlation between IFN1 and HLA1:')
+print(f'  rho = {rho_global:.3f}, p-value = {pval_global:.3e}')
+
+# Create a scatter plot of IFN1 vs HLA1 colored by Status
+def plot_global_correlation(df):
+    plt.figure(figsize=(6,4))
+    sns.scatterplot(data=df, x='IFN1', y='HLA1', hue='Status', alpha=0.6)
+    plt.title(f'IFN1 vs HLA1 (rho={rho_global:.2f}, p={pval_global:.1e})')
+    plt.xlabel('IFN1 Expression')
+    plt.ylabel('HLA1 Expression')
+    plt.tight_layout()
+    plt.show()
+
+plot_global_correlation(meta_df)
+
+# Note: Further steps will involve stratifying by cell_type_coarse and Status to compute subgroup-specific correlations and generate a grid of plots.
+
+
+================================================================================
+2025-05-04 13:51:11,561 - INFO
+================================================================================
+RESPONSE/OUTPUT: revised_analysis
+
+Revised Hypothesis: Severe COVID‐19 disrupts the normal co‐regulation between interferon response and antigen presentation. We hypothesize that the correlation between IFN1 (a proxy for interferon-stimulated gene expression) and HLA1 (an indicator of antigen presentation capacity) is significantly altered in COVID‐19 patients (Status = 1) compared to healthy controls (Status = 0) across various immune cell types. In addition, for subgroups with low cell counts, bootstrapping or permutation tests along with confidence intervals will be applied to ensure that the observed differences are statistically robust.
+
+Revised Analysis Plan:
+1. Step 1: Validate and extract the relevant metadata from the in-memory anndata object. This includes checking that the required columns ('Status', 'cell_type_coarse', 'IFN1', and 'HLA1') are present, ensuring there are no NaN values in the key gene expression columns, and logging a summary of the cell count.
+2. Step 2: Compute the global Spearman correlation between IFN1 and HLA1 over all cells. Report the correlation coefficient, the p-value, and the number of cells used in the calculation.
+3. Step 3: Create a scatter plot of IFN1 vs. HLA1 colored by the 'Status' variable. Use a reusable color mapping (e.g., blue for controls and red for COVID‐19) and overlay trend lines (with lowess smoothing) for each status group to visualize the relationship clearly.
+4. Step 4: Stratify the dataset by disease status and immune cell subtypes (from 'cell_type_coarse') and compute subgroup-specific Spearman correlations with associated p-values. For subgroups with low cell counts, implement bootstrap resampling or permutation tests to derive confidence intervals and bolster statistical inference.
+5. Step 5: Generate a grid of scatter plots with regression lines, where rows correspond to immune cell subtypes and columns to status. This layout will facilitate direct comparison of co-expression patterns across conditions and cell types.
+6. Step 6: Apply formal statistical comparisons (e.g., using Fisher’s z-transformation) to test whether the differences in correlation coefficients between groups are statistically significant.
+7. Step 7: Summarize and interpret the results in the context of the hypothesized dysregulation of interferon signaling and antigen presentation in severe COVID‐19, complementing visual and statistical outputs with effect size estimates (from bootstrapping or resampling analyses).
+
+Revised Code:
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import spearmanr
+
+# Check that the required columns exist in adata.obs
+required_cols = {'Status', 'cell_type_coarse', 'IFN1', 'HLA1'}
+if not required_cols.issubset(adata.obs.columns):
+    missing = required_cols - set(adata.obs.columns)
+    raise ValueError(f"Missing required columns in adata.obs: {missing}")
+
+# Extract the relevant metadata
+meta_df = adata.obs[['Status', 'cell_type_coarse', 'IFN1', 'HLA1']].copy()
+
+# Check for NaN values in the IFN1 and HLA1 columns
+if meta_df[['IFN1', 'HLA1']].isnull().any().any():
+    print("Warning: NaN values detected in IFN1 or HLA1; consider handling missing values before proceeding.")
+
+# Log the number of cells used in the analysis
+num_cells = meta_df.shape[0]
+print(f"Number of cells used for analysis: {num_cells}")
+
+# Compute global Spearman correlation between IFN1 and HLA1 across all cells
+rho_global, pval_global = spearmanr(meta_df['IFN1'], meta_df['HLA1'])
+print('Global Spearman correlation between IFN1 and HLA1:')
+print(f'  rho = {rho_global:.3f}, p-value = {pval_global:.3e}')
+
+# Define a reusable color mapping for status groups
+color_mapping = {0: 'blue', 1: 'red'}
+
+# Create a scatter plot of IFN1 vs HLA1 colored by Status and overlay regression lines
+
+def plot_global_correlation(df):
+    plt.figure(figsize=(6, 4))
+    # Scatter plot colored by Status using the predefined color mapping
+    sns.scatterplot(data=df, x='IFN1', y='HLA1', hue='Status', alpha=0.6, palette=color_mapping)
+
+    # Overlay a regression line for each status group using lowess smoothing
+    for status in sorted(df['Status'].unique()):
+        subset = df[df['Status'] == status]
+        sns.regplot(x='IFN1', y='HLA1', data=subset, scatter=False, label=f'Status {status} trend', color=color_mapping[status], lowess=True)
+
+    plt.title(f'IFN1 vs HLA1 (rho={rho_global:.2f}, p={pval_global:.1e})')
+    plt.xlabel('IFN1 Expression')
+    plt.ylabel('HLA1 Expression')
+    plt.legend(title='Status')
+    plt.tight_layout()
+    plt.show()
+
+plot_global_correlation(meta_df)
+
+# Future steps will build on this analysis by stratifying using 'cell_type_coarse' and 'Status', and applying formal statistical comparisons using methods such as Fisher’s z-transformation.
+
+
+================================================================================
+2025-05-04 13:52:40,902 - INFO
+================================================================================
+RESPONSE/OUTPUT: results_interpretation
+
+### Analysis Plan and Current Step Evaluation
+
+**Hypothesis:**
+In severe COVID-19, monocytes upregulate inflammatory ligands while T cells simultaneously increase corresponding receptors. This boosts communication signaling between monocytes and T cells compared to healthy controls, potentially contributing to immunopathology.
+
+**Current Step:**
+The analysis you conducted involves calculating the global Spearman correlation between IFN1 (Interferon) and HLA1 (Human Leukocyte Antigen) gene expressions, resulting in a rho of 0.155 with a p-value of 4.837e-239.
+
+### Feedback on Current Step
+
+1. **Correlation Interpretation:**
+   - The calculated Spearman correlation (rho = 0.155) suggests a very weak positive relationship between IFN1 and HLA1 gene expressions across the analyzed dataset. Despite the high statistical significance (as indicated by the extremely low p-value), the biological relevance might need further investigation as the correlation coefficient suggests only a modest association.
+
+2. **Contextual Relevance:**
+   - The correlation between IFN1 and HLA1 is loosely tied to the current hypothesis centered on monocyte-T cell communication. This analysis does not directly inform on monocyte-T cell interactions or the upregulation of specific inflammatory ligands and receptors.
+   - While understanding IFN1 and HLA1 interaction could be indicative of broader immune dysregulation in COVID-19, it doesn’t directly address your primary hypothesis or offer unique insights compared to previous analyses.
+
+### Recommendations for Future Steps
+
+1. **Correlation Expansion:**
+   - Explore correlations specifically between inflammatory ligands (TNF, IL1B, IL6) expressed by monocytes and their corresponding receptors on T cells (TNFRSF1A, IL1R1, IL6R). This would directly test the hypothesis and may reveal pertinent dysregulated communication pathways.
+
+2. **Cell-cell Communication Analysis:**
+   - Implement cell-cell communication analysis tools such as CellPhoneDB or NicheNet to detect ligand-receptor interactions. This will provide qualitative insights into altered communication dynamics between monocytes and T cells in severe COVID-19.
+
+3. **Subset Analysis:**
+   - Focus on specific immune cell subpopulations (like CD14+ and CD16+ monocytes, CD4+ and CD8+ T cells) to identify differential expression patterns that align with the hypothesis.
+   - Utilize differential expression and pathway enrichment analysis within these subsets to discover upregulated inflammatory pathways and receptor expression.
+
+4. **Further In-depth ISG Analysis:**
+   - Given the downregulation of HLA and variable ISG signature, conduct a deeper analysis to examine how interferon signaling pathways differ between COVID-19 patients and controls, especially in ventilated versus non-ventilated patients.
+
+5. **Validation with Independent Dataset:**
+   - Consider validating any promising findings with another dataset to ensure that the observed trends are reproducible and reliable.
+
+### Conclusion
+While the current step does not directly validate or refute the initial hypothesis, it indicates a marginal association that might be explored further. More targeted analyses focusing on specific ligand-receptor pairs and employing cell-cell communication tools will be crucial for advancing the understanding of immune dysregulation in severe COVID-19.
+
+
+================================================================================
+2025-05-04 13:54:50,883 - INFO
+================================================================================
+RESPONSE/OUTPUT: next_step
+
+Next step: Step 2: Subset the anndata object to identify the relevant cell populations based on 'cell_type_coarse': monocytes (value 3) and T cells (value 1). Extract the expression values for the inflammatory ligands (TNF, IL1B, IL6) in monocytes and the receptors (TNFRSF1A, IL1R1, IL6R) in T cells, while performing sanity checks on cell counts to ensure sufficient representation per group.
+
+Code:
+```python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import spearmanr
+from scipy.sparse import issparse
+import scanpy as sc
+import warnings
+
+# Define ligand and receptor pairs
+ligands = ['TNF', 'IL1B', 'IL6']
+receptors = ['TNFRSF1A', 'IL1R1', 'IL6R']
+assert len(ligands) == len(receptors), "The number of ligands and receptors must be equal."
+
+
+def check_genes_in_adata(genes, adata):
+    """
+    Checks if all genes in the list are present in adata.var_names. If not, raises a ValueError with details.
+    """
+    missing_genes = [g for g in genes if g not in adata.var_names]
+    if missing_genes:
+        msg = f"The following genes are missing in adata.var_names: {missing_genes}. Please review the dataset or update the gene list."
+        warnings.warn(msg)
+        raise ValueError(msg)
+
+# Ensure all genes are present in the dataset
+check_genes_in_adata(ligands + receptors, adata)
+
+# Define cell type masks using 'cell_type_coarse'
+monocyte_mask = adata.obs['cell_type_coarse'] == 3
+tcell_mask = adata.obs['cell_type_coarse'] == 1
+
+monocytes = adata[monocyte_mask]
+t_cells = adata[tcell_mask]
+
+# Sanity checks: Print the number of cells in each subset
+print(f"Number of monocytes: {monocytes.n_obs}")
+print(f"Number of T cells: {t_cells.n_obs}")
+
+
+def compute_average_expression(adata_subset, gene_list):
+    """
+    Computes the average expression for the given gene_list by donor and Status.
+    Verifies that expression values are numeric and non-empty. Logs the number of donors per group.
+    Returns a DataFrame with columns: Donor, Status, and averaged expression for each gene.
+    """
+    expr_df = pd.DataFrame()
+    expr_df['Donor'] = adata_subset.obs['Donor_full']
+    expr_df['Status'] = adata_subset.obs['Status']
+
+    for gene in gene_list:
+        expr = adata_subset[:, gene].X
+        # Handle sparse matrix conversion explicitly
+        if issparse(expr):
+            expr = expr.toarray().flatten()
+        else:
+            expr = np.array(expr).flatten()
+        if expr.size == 0:
+            raise ValueError(f"No expression data found for gene {gene}.")
+        expr_df[gene] = expr
+
+    # Check that expression data for each gene is numeric
+    for col in gene_list:
+        if not pd.api.types.is_numeric_dtype(expr_df[col]):
+            raise TypeError(f"Expression data for {col} is not numeric.")
+
+    # Group by Donor and Status, then compute the mean expression
+    avg_expr = expr_df.groupby(['Donor', 'Status'], as_index=False).mean()
+    donor_counts = avg_expr.groupby('Status').size()
+    print(f"Donor counts per Status group:\n{donor_counts}")
+    return avg_expr
+
+# Compute average expression for ligands in monocytes and receptors in T cells
+mono_avg = compute_average_expression(monocytes, ligands)
+tcell_avg = compute_average_expression(t_cells, receptors)
+
+# Merge the pseudo-bulk expression data on Donor and Status
+merged_avg = pd.merge(mono_avg, tcell_avg, on=['Donor', 'Status'], suffixes=('_mono', '_tcell'))
+
+# Initialize dictionary to store global correlation results
+correlation_results = {}
+
+print('Global Spearman correlations for ligand (monocytes) vs receptor (T cells):')
+for ligand, receptor in zip(ligands, receptors):
+    x = merged_avg[f'{ligand}_mono']
+    y = merged_avg[f'{receptor}_tcell']
+    rho, pval = spearmanr(x, y)
+    correlation_results[f'{ligand}-{receptor}'] = {'global_rho': rho, 'global_pval': pval, 'n_donors': merged_avg.shape[0]}
+    print(f'  {ligand} (monocytes) vs {receptor} (T cells): rho = {rho:.3f}, p-value = {pval:.3e}')
+
+# Compute stratified Spearman correlations by Status
+stratified_results = {}
+for status in sorted(merged_avg['Status'].unique()):
+    strat_df = merged_avg[merged_avg['Status'] == status]
+    if len(strat_df) < 3:
+        warnings.warn(f"Low donor count for Status {status}: {len(strat_df)} donor(s) may limit robust correlation estimation.")
+    stratified_results[status] = {}
+    print(f'\nStatus {status}:')
+    for ligand, receptor in zip(ligands, receptors):
+        x = strat_df[f'{ligand}_mono']
+        y = strat_df[f'{receptor}_tcell']
+        if len(strat_df) > 1:
+            rho, pval = spearmanr(x, y)
+        else:
+            rho, pval = (np.nan, np.nan)
+        stratified_results[status][f'{ligand}-{receptor}'] = {'rho': rho, 'pval': pval, 'n_donors': len(strat_df)}
+        print(f'  {ligand} (monocytes) vs {receptor} (T cells): rho = {rho:.3f}, p-value = {pval if not np.isnan(pval) else "NA"}')
+
+# Visualization: Generate dual-panel scatter plots with regression lines
+n_pairs = len(ligands)
+fig, axes = plt.subplots(n_pairs, 2, figsize=(12, 4 * n_pairs))
+for i, (ligand, receptor) in enumerate(zip(ligands, receptors)):
+    # Left panel: Overall correlation across all donors
+    ax_all = axes[i, 0]
+    sns.regplot(x=merged_avg[f'{ligand}_mono'], y=merged_avg[f'{receptor}_tcell'], 
+                ax=ax_all, scatter_kws={'s': 50, 'alpha': 0.7})
+    rho_all = correlation_results[f'{ligand}-{receptor}']['global_rho']
+    p_all = correlation_results[f'{ligand}-{receptor}']['global_pval']
+    ax_all.annotate(f'ρ = {rho_all:.2f}\np = {p_all:.1e}', 
+                    xy=(0.05, 0.90), xycoords='axes fraction', fontsize=10,
+                    bbox=dict(boxstyle='round,pad=0.3', fc='yellow', alpha=0.3))
+    ax_all.set_title(f'Overall: {ligand} (monocytes) vs {receptor} (T cells)')
+    ax_all.set_xlabel(f'Avg {ligand} Expression (Monocytes)')
+    ax_all.set_ylabel(f'Avg {receptor} Expression (T cells)')
+    
+    # Right panel: Stratified by Status
+    ax_strat = axes[i, 1]
+    statuses = sorted(merged_avg['Status'].unique())
+    for status in statuses:
+        strat_df = merged_avg[merged_avg['Status'] == status]
+        sns.regplot(x=strat_df[f'{ligand}_mono'], y=strat_df[f'{receptor}_tcell'], 
+                    label=f'Status {status}', ax=ax_strat, scatter_kws={'s': 50, 'alpha': 0.7})
+        if len(strat_df) > 1:
+            temp_rho, temp_p = spearmanr(strat_df[f'{ligand}_mono'], strat_df[f'{receptor}_tcell'])
+            xpos = 0.05 if status == statuses[0] else 0.65
+            ax_strat.annotate(f'Status {status}: ρ={temp_rho:.2f}\np={temp_p:.1e}', 
+                              xy=(xpos, 0.85 - 0.1*status), xycoords='axes fraction', fontsize=9,
+                              bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.5))
+    ax_strat.set_title(f'Stratified by Status: {ligand} vs {receptor}')
+    ax_strat.set_xlabel(f'Avg {ligand} Expression (Monocytes)')
+    ax_strat.set_ylabel(f'Avg {receptor} Expression (T cells)')
+    ax_strat.legend()
+
+plt.tight_layout()
+plt.show()
+
+# Note: Future steps will include additional statistical tests (e.g., Fisher z-transformation) to compare the correlation coefficients between statuses.
+```
+
+
+================================================================================
+2025-05-04 14:04:21,710 - INFO
+================================================================================
+RESPONSE/OUTPUT: next_step
+
+Next step: Step 2: Reassess cell type annotations to identify misclassified T cells.
+
+Code:
+```python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import scanpy as sc
+from scipy.sparse import issparse
+import warnings
+
+# Define canonical T cell markers
+tcell_markers = ['CD3D', 'CD3E', 'CD3G']
+
+# Verify that each T cell marker is present in adata.var_names
+missing_markers = [gene for gene in tcell_markers if gene not in adata.var_names]
+if missing_markers:
+    raise ValueError(f"Missing T cell markers in dataset: {missing_markers}")
+
+# Sanity check: Plot and print summary statistics for each marker
+for gene in tcell_markers:
+    gene_expr = adata[:, gene].X
+    if issparse(gene_expr):
+        gene_expr = gene_expr.toarray().flatten()
+    else:
+        gene_expr = np.array(gene_expr).flatten()
+    print(f"Summary statistics for {gene} - min: {np.min(gene_expr):.2f}, median: {np.median(gene_expr):.2f}, mean: {np.mean(gene_expr):.2f}, max: {np.max(gene_expr):.2f}")
+    plt.figure(figsize=(6, 3))
+    sns.histplot(gene_expr, bins=30, kde=True, color='steelblue')
+    plt.title(f'Expression distribution of {gene}')
+    plt.xlabel('Expression level')
+    plt.ylabel('Cell count')
+    plt.tight_layout()
+    plt.show()
+
+# Function to compute the composite T cell score
+
+def compute_tcell_score(adata_obj, markers, threshold_percentile=75):
+    # Extract expression data for the markers
+    marker_data = adata_obj[:, markers].X
+    if issparse(marker_data):
+        marker_data = marker_data.toarray()
+
+    # Compute composite score for each cell (row-wise sum)
+    composite_score = marker_data.sum(axis=1)
+
+    # Add composite score to adata.obs
+    adata_obj.obs['T_cell_score'] = composite_score
+
+    # Print summary statistics for the composite score
+    print(f"T_cell_score summary statistics: min={np.min(composite_score):.2f}, median={np.median(composite_score):.2f}, mean={np.mean(composite_score):.2f}, max={np.max(composite_score):.2f}")
+
+    # Define threshold using the specified percentile
+    thresh = np.percentile(composite_score, threshold_percentile)
+    adata_obj.obs['putative_T_cell'] = composite_score > thresh
+    print(f"Identified {adata_obj.obs['putative_T_cell'].sum()} putative T cells out of {adata_obj.obs.shape[0]} total cells (threshold = {thresh:.2f}).")
+
+    return thresh
+
+# Compute composite T cell score and define threshold at 75th percentile
+threshold = compute_tcell_score(adata, tcell_markers, threshold_percentile=75)
+
+# Visualize distribution of composite T cell score
+plt.figure(figsize=(8, 5))
+sns.histplot(adata.obs['T_cell_score'], bins=30, kde=True, color='skyblue')
+plt.axvline(threshold, color='red', linestyle='--', label=f'75th percentile (threshold = {threshold:.2f})')
+plt.xlabel('T cell composite score (CD3D + CD3E + CD3G)')
+plt.ylabel('Cell count')
+plt.title('Distribution of T cell composite scores')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# If UMAP coordinates are available in adata.obsm, overlay putative T cell flags on UMAP
+if 'X_umap' in adata.obsm:
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x=adata.obsm['X_umap'][:, 0], y=adata.obsm['X_umap'][:, 1],
+                    hue=adata.obs['putative_T_cell'], palette={True: 'red', False: 'gray'}, alpha=0.6)
+    plt.title('UMAP Projection Highlighting Putative T Cells')
+    plt.xlabel('UMAP1')
+    plt.ylabel('UMAP2')
+    plt.legend(title='Putative T cell')
+    plt.tight_layout()
+    plt.show()
+else:
+    warnings.warn('UMAP coordinates not found in adata.obsm; skipping UMAP plot.')
+```
+
+
+================================================================================
+2025-05-04 14:06:31,380 - INFO
+================================================================================
+RESPONSE/OUTPUT: results_interpretation
+
+**Feedback on Current Step and Results:**
+
+The current analysis focuses on identifying T cells among the single-cell transcriptomic data, using expression markers CD3D, CD3E, and CD3G to calculate a T_cell_score. The results suggest 10,344 out of 44,721 total cells are potential T cells. However, the computed summary statistics indicate relatively low expression levels for CD3D, CD3E, and CD3G, with medians at 0.00 and means under 0.25, which may indicate that the scoring threshold (1.10) could be either too high or the markers alone might be insufficient for robust T cell identification.
+
+**Recommendations for Further Steps:**
+
+1. **Validation of T cell Identification Strategy:**
+   - Re-evaluate the inclusion criteria for putative T cells. Given that the median expression is 0.00 for all markers, consider alternative or additional markers to increase accuracy. 
+   - Compare this identification strategy with the one from the paper, ensuring different attributes are being used or a new methodological combination is applied.
+
+2. **Increase Resolution of Cell-type Identification:**
+   - Use unsupervised clustering strategies (e.g., UMAP followed by Louvain clustering) to corroborate the T_cell_score results, potentially identifying subclusters within this putative T cell population.
+   - Implement differential expression analysis to validate that identified putative T cells express canonical T cell markers more robustly than other clusters.
+
+3. **Target Analysis of Monocyte-T Cell Interaction:**
+   - Following the broad T cell identification, perform expression analysis on predicted ligand-receptor interactions between monocytes and T cells to assess the hypothesized upregulation of inflammatory ligands and receptors. Examine individual gene expression for TNF, IL1B, IL6 in monocytes and TNFRSF1A, IL1R1, IL6R in T cells.
+   - Explore these interactions specifically within the context of severe COVID-19 vs. control samples for comparative insights.
+
+4. **Incorporate RNA Velocity and Trajectory Analysis (if feasible):**
+   - Consider performing trajectory analysis or RNA velocity on identified T cell populations to explore any dynamic changes happening through the course of severe COVID-19. This might ascertain the involvement of T cells within the broader immune response spectrum.
+
+**Validation of Hypothesis:**
+
+As the main focus is on the monocyte-T cell communication in severe COVID-19, these steps should aim to elucidate whether there is an altered communication pathway that is distinct from what the paper detailed. Focusing on alternative pathways or novel cell communication insights will help in providing credible new knowledge if monocyte-T cell interaction is verified or provide a new avenue for understanding immune changes in COVID-19 pathology if not validated.
+
+
+================================================================================
+2025-05-04 14:07:45,820 - INFO
+================================================================================
+RESPONSE/OUTPUT: next_step
+
+Next step: Step 2: From the dataset, identify putative T cells based on the composite CD3 marker score. Convert the clinical metadata (Status) to categorical labels (e.g., 0 to 'Healthy', 1 to 'COVID') for clarity in downstream plots. Then perform unsupervised subclustering which includes: data normalization (with logging of the normalization method), log-transformation (if not already applied), selection of highly variable genes, scaling (with outlier trimming), dimensionality reduction (PCA), computing a neighborhood graph, UMAP visualization, and graph-based clustering using Louvain. Key steps will be recorded using Python's logging module to facilitate reproducibility.
+
+Code:
+```python
+import scanpy as sc
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Convert numeric clinical status to categorical labels for clarity
+if adata.obs['Status'].dtype.kind in 'biufc':
+    # Map 0 -> 'Healthy' and 1 -> 'COVID' if not already mapped
+    adata.obs['Status'] = adata.obs['Status'].map({0: 'Healthy', 1: 'COVID'})
+    logging.info("Converted Status from numeric to categorical labels (Healthy/COVID).")
+
+# Extract putative T cells using the composite score flag
+if adata.obs['putative_T_cell'].dtype != bool:
+    adata.obs['putative_T_cell'] = adata.obs['putative_T_cell'].astype(bool)
+
+adata_t = adata[adata.obs['putative_T_cell']].copy()
+logging.info(f'Extracted putative T cells: {adata_t.shape[0]} cells out of {adata.shape[0]} total cells.')
+
+# Check for normalization via log1p transformation. Additionally, record the normalization method used.
+if 'log1p' not in adata_t.uns.keys():
+    logging.info('Normalization and log1p transformation not detected. Applying normalization...')
+    sc.pp.normalize_total(adata_t, target_sum=1e4)
+    sc.pp.log1p(adata_t)
+    # Record normalization metadata for reproducibility
+    adata_t.uns['log1p'] = True
+    adata_t.uns['normalization_info'] = 'normalize_total with target_sum=1e4 followed by log1p transformation'
+    logging.info('Normalization and log1p transformation completed.')
+else:
+    logging.info('Data is already log-transformed.')
+
+# Identify highly variable genes (top 2000) using the Seurat flavor
+sc.pp.highly_variable_genes(adata_t, n_top_genes=2000, subset=True, flavor='seurat')
+logging.info('Selected top 2000 highly variable genes.')
+
+# Scale the data with a cap on extreme values
+sc.pp.scale(adata_t, max_value=10)
+
+# Perform PCA using the arpack solver
+sc.tl.pca(adata_t, svd_solver='arpack')
+logging.info('PCA completed using available principal components.')
+
+# Compute the neighborhood graph using 20 PCs and 10 neighbors, then compute UMAP for visualization
+sc.pp.neighbors(adata_t, n_neighbors=10, n_pcs=20)
+sc.tl.umap(adata_t)
+logging.info('UMAP computation completed.')
+
+# Perform Louvain clustering to identify T cell subclusters; resolution may be adjusted based on exploratory analysis
+sc.tl.louvain(adata_t, resolution=0.5)
+num_clusters = adata_t.obs['louvain'].nunique()
+logging.info(f'Louvain clustering completed. Identified {num_clusters} subclusters.')
+
+# Define the colors and titles for the UMAP plots
+plot_colors = ['louvain', 'CD3D', 'CD3E', 'CD3G', 'Status']
+plot_titles = ['T cell Subclusters (Louvain)', 'CD3D Expression', 'CD3E Expression', 'CD3G Expression', 'Clinical Status']
+
+# Generate UMAP plots overlaying clustering, canonical markers, and clinical metadata
+sc.pl.umap(adata_t, color=plot_colors, wspace=0.4, title=plot_titles, show=True)
+
+# Propagate the T cell subcluster labels back to the full dataset for downstream analyses
+adata.obs.loc[adata_t.obs_names, 'Tcell_subcluster'] = adata_t.obs['louvain']
+logging.info('T cell subclustering labels propagated to the full dataset.')
+
+logging.info('T cell subclustering and validation step complete.')
+
+```
+
+
+================================================================================
+2025-05-04 14:24:24,071 - INFO
+================================================================================
+RESPONSE/OUTPUT: next_step
+
+Next step: Step 2: Perform a temporal (DPS-based) analysis of the IFN1 and HLA1 correlation in COVID-19 patients. First, filter out any cells with missing values in IFN1, HLA1, or DPS. Then, bin the cells into three groups (Early: DPS ≤ 3, Mid: DPS 4–10, Late: DPS > 10) and for each bin compute both the global Spearman correlation and bootstrap-based confidence intervals (with a flexible confidence level parameter). Log the number of cells per bin and report additional descriptive statistics such as mean and median expressions of IFN1 and HLA1.
+
+Code:
+```python
+#!/usr/bin/env python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import spearmanr
+import warnings
+
+# Create a copy of the metadata from adata.obs
+meta_df = adata.obs[['Status', 'DPS', 'IFN1', 'HLA1']].copy()
+
+# Focus on COVID-19 patients only (Status = 1)
+covid_df = meta_df[meta_df['Status'] == 1].copy()
+
+# Check & filter for NaNs in IFN1, HLA1, and DPS to ensure clean analysis
+if covid_df[['IFN1', 'HLA1', 'DPS']].isnull().any().any():
+    warnings.warn('Missing values detected in one or more of IFN1, HLA1, or DPS. Filtering these out for robust analysis.')
+    covid_df = covid_df.dropna(subset=['IFN1', 'HLA1', 'DPS'])
+
+# Ensure DPS is numeric (in case it is stored as a string)
+covid_df['DPS'] = pd.to_numeric(covid_df['DPS'], errors='coerce')
+
+# Define DPS bins: Early (DPS <= 3), Mid (4 <= DPS <= 10), Late (DPS > 10)
+bins = [-np.inf, 3, 10, np.inf]
+labels = ['Early', 'Mid', 'Late']
+covid_df['DPS_bin'] = pd.cut(covid_df['DPS'], bins=bins, labels=labels)
+
+# Print the distribution of cells in each DPS bin for transparency
+print('Cell counts per DPS bin:')
+print(covid_df['DPS_bin'].value_counts())
+
+
+def bootstrap_spearman(x, y, n_bootstrap=1000, random_state=42, conf_level=0.95):
+    """Computes bootstrap estimates of the Spearman correlation between x and y.
+
+    Parameters:
+      x, y: Arrays of expression values.
+      n_bootstrap: Number of bootstrap resamples (default: 1000).
+      random_state: Seed for reproducibility (default: 42).
+      conf_level: Confidence level for the interval (default: 0.95).
+
+    Returns:
+      median_corr: The median bootstrap Spearman correlation.
+      (ci_lower, ci_upper): Tuple representing the lower and upper bounds of the confidence interval.
+    """
+    rng = np.random.default_rng(random_state)
+    boot_corrs = []
+    n = len(x)
+    if n < 3:
+        return np.nan, (np.nan, np.nan)
+    lower = (1 - conf_level) / 2 * 100
+    upper = 100 - lower
+    for i in range(n_bootstrap):
+        idx = rng.integers(0, n, n)
+        try:
+            r, _ = spearmanr(x[idx], y[idx])
+        except Exception as e:
+            r = np.nan
+        boot_corrs.append(r)
+    boot_corrs = np.array(boot_corrs)
+    median_corr = np.nanmedian(boot_corrs)
+    ci_lower = np.nanpercentile(boot_corrs, lower)
+    ci_upper = np.nanpercentile(boot_corrs, upper)
+    return median_corr, (ci_lower, ci_upper)
+
+# Prepare to collect correlation results
+results = []
+
+for group in labels:
+    group_df = covid_df[covid_df['DPS_bin'] == group]
+    n_cells = group_df.shape[0]
+    if n_cells < 3:
+        warnings.warn(f'Not enough cells in {group} group (n={n_cells}). Skipping correlation analysis for this bin.')
+        continue
+    # Compute global Spearman correlation for the group
+    rho, pval = spearmanr(group_df['IFN1'], group_df['HLA1'])
+    # Bootstrap estimation for confidence intervals
+    boot_rho, (ci_lower, ci_upper) = bootstrap_spearman(group_df['IFN1'].values, group_df['HLA1'].values)
+    results.append({
+        'DPS_bin': group,
+        'n_cells': n_cells,
+        'spearman_rho': rho,
+        'p_value': pval,
+        'bootstrapped_rho': boot_rho,
+        'CI_lower': ci_lower,
+        'CI_upper': ci_upper
+    })
+    print(f"{group} group (n={n_cells}): Spearman rho = {rho:.3f} (p={pval:.2e}), Bootstrapped median rho = {boot_rho:.3f} with 95% CI: [{ci_lower:.3f}, {ci_upper:.3f}]")
+
+# Convert results to DataFrame
+results_df = pd.DataFrame(results)
+
+# Plot bootstrapped median correlations with error bars for the 95% CI
+plt.figure(figsize=(7,5))
+ax = plt.gca()
+# Iterate through the expected categorical order to ensure correct alignment
+for group in labels:
+    if group in results_df['DPS_bin'].values:
+        row = results_df[results_df['DPS_bin'] == group].iloc[0]
+        xpos = labels.index(group)  # ensures consistent ordering
+        err_lower = row['bootstrapped_rho'] - row['CI_lower']
+        err_upper = row['CI_upper'] - row['bootstrapped_rho']
+        ax.bar(xpos, row['bootstrapped_rho'], color=sns.color_palette('viridis', n_colors=3)[xpos], width=0.6)
+        plt.errorbar(x=xpos, y=row['bootstrapped_rho'], yerr=[[err_lower], [err_upper]], fmt='none', c='black', capsize=5)
+        plt.text(xpos, row['bootstrapped_rho'] + err_upper + 0.02, f"n={int(row['n_cells'])}", ha='center', va='bottom', fontsize=9)
+
+ax.set_xticks(range(len(labels)))
+ax.set_xticklabels(labels)
+plt.xlabel('Disease Stage (DPS Bin)')
+plt.ylabel('Bootstrapped Spearman Correlation (IFN1 vs HLA1)')
+plt.title('Temporal Dynamics of IFN1-HLA1 Correlation in COVID-19 Patients')
+plt.tight_layout()
+plt.show()
+
+# For comparison, similar analysis can later be extended to Healthy controls if desired.
+```
+
+
+================================================================================
+2025-05-04 14:34:07,174 - INFO
+================================================================================
+RESPONSE/OUTPUT: next_step
+
+Next step: Step 1: Data Preprocessing and Quality Control - Subset the metadata to COVID-19 patients and ensure key features (IFN1, HLA1, DPS) are non-null and numeric. Compute and log summary statistics for DPS, including an outlier assessment using the IQR method. Document the number of potential outliers.
+
+Code:
+```python
+#!/usr/bin/env python
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import spearmanr
+import warnings
+import logging
+
+# Configure logging for consistent reporting
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Step 1: Data Preprocessing and Quality Control
+# Create a copy of the metadata from adata.obs and focus on COVID-19 patients (Status == 1)
+meta_df = adata.obs[['Status', 'DPS', 'IFN1', 'HLA1']].copy()
+covid_df = meta_df[meta_df['Status'] == 1].copy()
+
+# Check & filter for NaNs in key columns to ensure robust analysis
+if covid_df[['IFN1', 'HLA1', 'DPS']].isnull().any().any():
+    warnings.warn('Missing values detected in IFN1, HLA1, or DPS. Filtering these out for robust analysis.')
+    covid_df = covid_df.dropna(subset=['IFN1', 'HLA1', 'DPS'])
+
+# Ensure DPS is numeric (in case it is stored as a string)
+covid_df['DPS'] = pd.to_numeric(covid_df['DPS'], errors='coerce')
+
+# Log DPS distribution and perform outlier detection using the IQR method
+dps_desc = covid_df['DPS'].describe()
+logging.info(f'DPS distribution (raw): {dps_desc.to_dict()}')
+
+Q1 = covid_df['DPS'].quantile(0.25)
+Q3 = covid_df['DPS'].quantile(0.75)
+IQR = Q3 - Q1
+lower_bound = Q1 - 1.5 * IQR
+upper_bound = Q3 + 1.5 * IQR
+num_outliers = covid_df[(covid_df['DPS'] < lower_bound) | (covid_df['DPS'] > upper_bound)].shape[0]
+logging.info(f'Identified {num_outliers} potential outlier(s) in DPS (values outside [{lower_bound:.2f}, {upper_bound:.2f}]).')
+
+# Step 2: Data-Driven DPS Binning
+# Use quantile-based binning (pd.qcut) to define balanced DPS bins (tertiles)
+try:
+    covid_df['DPS_bin'] = pd.qcut(covid_df['DPS'], q=3, labels=['Early', 'Mid', 'Late'])
+    logging.info('Successfully applied quantile-based binning (tertiles) to DPS.')
+except ValueError as e:
+    warnings.warn(f'Quantile binning failed: {e}. Falling back to fixed bins.')
+    bins = [-np.inf, 3, 10, np.inf]
+    labels_fixed = ['Early', 'Mid', 'Late']
+    covid_df['DPS_bin'] = pd.cut(covid_df['DPS'], bins=bins, labels=labels_fixed)
+    logging.info('Applied fixed threshold binning to DPS.')
+
+# Log cell counts per DPS bin for transparency
+cell_counts = covid_df['DPS_bin'].value_counts().to_dict()
+logging.info(f'Cell counts per DPS bin after binning: {cell_counts}')
+
+# Define the bootstrap function for Spearman correlation
+
+def bootstrap_spearman(x, y, n_bootstrap=1000, random_state=42, conf_level=0.95):
+    """Compute bootstrapped estimates of the Spearman correlation between x and y."""
+    rng = np.random.default_rng(random_state)
+    boot_corrs = []
+    n = len(x)
+    if n < 3:
+        return np.nan, (np.nan, np.nan)
+    lower = (1 - conf_level) / 2 * 100
+    upper = 100 - lower
+    for i in range(n_bootstrap):
+        idx = rng.integers(0, n, n)
+        try:
+            r, _ = spearmanr(x[idx], y[idx])
+        except Exception:
+            r = np.nan
+        boot_corrs.append(r)
+    boot_corrs = np.array(boot_corrs)
+    median_corr = np.nanmedian(boot_corrs)
+    ci_lower = np.nanpercentile(boot_corrs, lower)
+    ci_upper = np.nanpercentile(boot_corrs, upper)
+    return median_corr, (ci_lower, ci_upper)
+
+# Step 3: Correlation Analysis within Each DPS Bin
+results = []
+ordered_bins = ['Early', 'Mid', 'Late']
+
+for bin_label in ordered_bins:
+    group_df = covid_df[covid_df['DPS_bin'] == bin_label]
+    n_cells = group_df.shape[0]
+    if n_cells < 3:
+        warnings.warn(f'Not enough cells in {bin_label} group (n = {n_cells}). Skipping correlation analysis for this bin.')
+        continue
+    # Compute the Spearman correlation using the raw data
+    rho, pval = spearmanr(group_df['IFN1'], group_df['HLA1'])
+    # Carry out bootstrapping for robust estimates
+    boot_rho, (ci_lower, ci_upper) = bootstrap_spearman(group_df['IFN1'].values, group_df['HLA1'].values)
+    results.append({
+        'DPS_bin': bin_label,
+        'n_cells': n_cells,
+        'spearman_rho': rho,
+        'p_value': pval,
+        'bootstrapped_rho': boot_rho,
+        'CI_lower': ci_lower,
+        'CI_upper': ci_upper
+    })
+    logging.info(f"{bin_label} group (n={n_cells}): Spearman rho = {rho:.3f} (p = {pval:.2e}), Bootstrapped median rho = {boot_rho:.3f} with 95% CI: [{ci_lower:.3f}, {ci_upper:.3f}]")
+
+results_df = pd.DataFrame(results)
+
+# Step 4: Visualization
+if results_df.empty:
+    warnings.warn('No DPS bins had sufficient cells for correlation analysis. Please review DPS values and binning strategy.')
+else:
+    plt.figure(figsize=(7, 5))
+    ax = plt.gca()
+    palette = sns.color_palette('viridis', n_colors=3)
+    for bin_label in ordered_bins:
+        if bin_label in results_df['DPS_bin'].values:
+            row = results_df[results_df['DPS_bin'] == bin_label].iloc[0]
+            xpos = ordered_bins.index(bin_label)
+            err_lower = row['bootstrapped_rho'] - row['CI_lower']
+            err_upper = row['CI_upper'] - row['bootstrapped_rho']
+            ax.bar(xpos, row['bootstrapped_rho'], color=palette[xpos], width=0.6, label=bin_label)
+            plt.errorbar(x=xpos, y=row['bootstrapped_rho'], yerr=[[err_lower], [err_upper]], fmt='none', c='black', capsize=5)
+            plt.text(xpos, row['bootstrapped_rho'] + err_upper + 0.02, f"n={int(row['n_cells'])}", ha='center', va='bottom', fontsize=9)
+    ax.set_xticks(range(len(ordered_bins)))
+    ax.set_xticklabels(ordered_bins)
+    plt.xlabel('DPS Bin (Quantile-based)')
+    plt.ylabel('Bootstrapped Spearman Correlation (IFN1 vs HLA1)')
+    plt.title('Re-assessed Temporal Dynamics of IFN1-HLA1 Correlation in COVID-19 Patients')
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+```
