@@ -84,21 +84,25 @@ class AnalysisAgent:
             obs_dict = {}
             
             # Process each column in obs
-            for k in [k for k in f['obs'].keys() if not k.startswith('_')]:
-                data = f['obs'][k][:]
+            for raw_k in [k for k in f['obs'].keys() if not k.startswith('_')]:
+                # Decode the column name if it's bytes
+                k = raw_k.decode('utf-8') if isinstance(raw_k, bytes) else raw_k
+                
+                data = f['obs'][raw_k][:]
                 
                 # Handle categorical data
-                if 'categories' in f['obs'][k].attrs:
+                if 'categories' in f['obs'][raw_k].attrs:
                     try:
                         # Get category values (handling references if needed)
-                        cat_ref = f['obs'][k].attrs['categories']
+                        cat_ref = f['obs'][raw_k].attrs['categories']
                         if isinstance(cat_ref, h5py.h5r.Reference):
                             # Dereference to get categories
-                            categories = [str(x) for x in f[cat_ref][:]]
+                            cat_vals = f[cat_ref][:]
+                            categories = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in cat_vals]
                         else:
                             # Normal categories
-                            cat_vals = f['obs'][k].attrs['categories'][:]
-                            categories = cat_vals.asstr()[:] if hasattr(cat_vals, 'asstr') else [str(v) for v in cat_vals]
+                            cat_vals = f['obs'][raw_k].attrs['categories'][:]
+                            categories = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in cat_vals]
                         
                         # Create categorical data
                         data = pd.Categorical.from_codes(
@@ -107,28 +111,28 @@ class AnalysisAgent:
                         )
                     except Exception as e:
                         print(f"Warning: Error with categorical {k}: {str(e)}")
-                        data = np.array([str(x) for x in data])
+                        data = np.array([x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in data])
                 
                 # Handle string data
-                elif data.dtype.kind in ['S', 'O'] or h5py.check_string_dtype(f['obs'][k].dtype) is not None:
+                elif data.dtype.kind in ['S', 'O'] or h5py.check_string_dtype(f['obs'][raw_k].dtype) is not None:
                     try:
-                        if data.dtype.kind == 'S':
-                            data = np.array([s.decode('utf-8') if isinstance(s, bytes) else str(s) for s in data])
-                        elif hasattr(f['obs'][k], 'asstr'):
-                            data = f['obs'][k].asstr()[:]
-                    except Exception:
-                        pass
+                        # Make sure all byte strings are decoded
+                        data = np.array([x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in data])
+                    except Exception as e:
+                        print(f"Warning: Error decoding strings in {k}: {str(e)}")
                 
                 obs_dict[k] = data
             
             # Get index
             try:
                 if '_index' in f['obs']:
-                    idx = f['obs']['_index']
-                    index = idx.asstr()[:] if hasattr(idx, 'asstr') else np.array([str(x) for x in idx[:]])
+                    idx = f['obs']['_index'][:]
+                    # Decode index values if they're bytes
+                    index = np.array([x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in idx])
                 else:
                     index = None
-            except Exception:
+            except Exception as e:
+                print(f"Warning: Error processing index: {str(e)}")
                 index = None
         
         # Create dataframe
@@ -298,6 +302,7 @@ class AnalysisAgent:
             return no_interpretation
         
         #### Extract text output ####
+        testing = False
         text_output = ""
         if 'outputs' in last_cell:
             for output in last_cell['outputs']:
@@ -305,14 +310,29 @@ class AnalysisAgent:
                     text_output += output.get('text', '')
                 elif output.get('output_type') == 'execute_result': # variable outputs e.g. df.head()
                     text_output += str(output.get('data', {}).get('text/plain', ''))
+
+        if testing:
+            print("TEXT OUTPUT: ", text_output)
         
         #### Extract image outputs ####
         image_outputs = []
         if 'outputs' in last_cell:
-            for output in last_cell['outputs']:
+            for i, output in enumerate(last_cell['outputs']):
                 if output.get('output_type') == 'display_data':
                     image_data = output.get('data', {}).get('image/png')
                     if image_data:
+                        # Save image to file for testing
+                        if testing:
+                            try:
+                                img_bytes = base64.b64decode(image_data)
+                                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                img_path = os.path.join(self.output_dir, f'debug_image_{timestamp}_{i}.png')
+                                with open(img_path, 'wb') as f:
+                                    f.write(img_bytes)
+                                print(f"Saved debug image to {img_path}")
+                            except Exception as e:
+                                print(f"Error saving debug image {i}: {str(e)}")
+                            
                         image_outputs.append({
                             'data': image_data,
                             'format': 'image/png'
@@ -349,7 +369,7 @@ class AnalysisAgent:
         response = self.client.chat.completions.create(
             model = "gpt-4o",
             messages = [
-                {"role": "system", "content": "You are a single-cell bioinformatics expert providing feedback on code and analysis plan."},
+                {"role": "system", "content": "You are a single-cell transcriptomics expert providing feedback on Python code and analysis plan."},
                 {"role": "user", "content": user_content}
             ]
         )
