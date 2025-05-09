@@ -417,8 +417,8 @@ class AnalysisAgent:
             
             # Create a markdown cell with the analysis plan
             plan_markdown = "# Analysis Plan\n\n**Hypothesis**: " + hypothesis + "\n\n## Steps:\n"
-            for i, step in enumerate(analysis_plan):
-                plan_markdown += f"{i+1}. {step}\n"
+            for step in analysis_plan:
+                plan_markdown += f"- {step}\n"
 
             # Create initial notebook with the hypothesis and plan
             notebook = self.create_initial_notebook(hypothesis)
@@ -481,7 +481,7 @@ class AnalysisAgent:
                 self.update_code_memory(notebook.cells)
 
             # Save the notebook
-            notebook_path = os.path.join(self.output_dir, f"analysis_{analysis_idx+1}.ipynb")
+            notebook_path = os.path.join(self.output_dir, f"{self.analysis_name}_analysis_{analysis_idx+1}.ipynb")
             with open(notebook_path, 'w', encoding='utf-8') as f:
                 nbf.write(notebook, f)
             print(f"💾 Saved notebook to: {notebook_path}")
@@ -531,16 +531,13 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
         """Execute only the last cell of the notebook while preserving previous cell outputs"""
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Save realtime copy for user viewing
-                realtime_dir = os.path.join(self.output_dir, "realtime")
-                os.makedirs(realtime_dir, exist_ok=True)
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                realtime_path = os.path.join(realtime_dir, f"notebook_{timestamp}.ipynb")
+                # Save to a single file in the output directory
+                notebook_path = os.path.join(self.output_dir, f"{self.analysis_name}_current_analysis.ipynb")
                 
                 # Save pre-execution notebook
-                with open(realtime_path, 'w', encoding='utf-8') as f:
+                with open(notebook_path, 'w', encoding='utf-8') as f:
                     nbf.write(notebook, f)
-                    print(f"💾 Saved notebook to: {realtime_path}")
+                    print(f"💾 Saved notebook to: {notebook_path}")
                 
                 # Create temporary execution notebook
                 temp_path = os.path.join(temp_dir, "temp_notebook.ipynb")
@@ -570,9 +567,9 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
                     nbf.write(nb, f)
                 with open(temp_path, encoding='utf-8') as f:
                     executed_nb = nbf.read(f, as_version=4)
-                with open(realtime_path, 'w', encoding='utf-8') as f:
+                with open(notebook_path, 'w', encoding='utf-8') as f:
                     nbf.write(executed_nb, f)
-                    print(f"💾 Saved executed notebook to: {realtime_path}")
+                    print(f"💾 Updated notebook at: {notebook_path}")
                 
                 # Check for errors in the last cell
                 last_cell = executed_nb.cells[-1]
