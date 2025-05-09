@@ -348,37 +348,43 @@ class AnalysisAgent:
                                CODING_GUIDELINES=self.coding_guidelines, past_analyses=past_analyses)
         user_content.append({"type": "text", "text": prompt})
 
-        for img in image_outputs:
-            try:
-                # Get the image data 
-                image_data = img['data']
-                
-                # Remove the base64 prefix if present
-                if isinstance(image_data, str) and "," in image_data:
-                    image_data = image_data.split(",")[1]
-                
-                # Add the image to the content
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{image_data}"
-                    }
-                })
-            except Exception as e:
-                print(f"Warning: Error processing image: {str(e)}")
-                
-        response = self.client.chat.completions.create(
-            model = "gpt-4o",
-            messages = [
-                {"role": "system", "content": "You are a single-cell transcriptomics expert providing feedback on Python code and analysis plan."},
-                {"role": "user", "content": user_content}
-            ]
-        )
-        feedback = response.choices[0].message.content
-        
-        self.logger.log_prompt("user", user_content, "Results Interpretation")
-        
-        return feedback
+        try:
+            for img in image_outputs:
+                try:
+                    # Get the image data 
+                    image_data = img['data']
+                    
+                    # Remove the base64 prefix if present
+                    if isinstance(image_data, str) and "," in image_data:
+                        image_data = image_data.split(",")[1]
+                    
+                    # Add the image to the content
+                    user_content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{image_data}"
+                        }
+                    })
+                except Exception as e:
+                    print(f"Warning: Error processing image: {str(e)}")
+                    continue  # Skip this image and continue with others
+                    
+            response = self.client.chat.completions.create(
+                model = "gpt-4o",
+                messages = [
+                    {"role": "system", "content": "You are a single-cell transcriptomics expert providing feedback on Python code and analysis plan."},
+                    {"role": "user", "content": user_content}
+                ]
+            )
+            feedback = response.choices[0].message.content
+            
+            self.logger.log_prompt("user", text_output, "Results Interpretation")
+            
+            return feedback
+        finally:
+            # Clean up image data
+            image_outputs.clear()
+            user_content.clear()
     
     def get_feedback(self, analysis, past_analyses, notebook_cells, iterations=1):
         current_analysis = analysis
@@ -449,6 +455,7 @@ class AnalysisAgent:
                 else:
                     print(f"⚠️ Code errored with: {error_msg}")
                     fix_attempt, fix_successful = 0, False
+                    results_interpretation = ""  # Initialize at start of error block
                     while fix_attempt < max_fix_attempts and not fix_successful:
                         fix_attempt += 1
                         print(f"  🔧 Fix attempt {fix_attempt}/{max_fix_attempts}")
@@ -461,6 +468,12 @@ class AnalysisAgent:
                         if success:
                             fix_successful = True
                             print(f"  ✅ Fix successful on attempt {fix_attempt}")
+                            results_interpretation = self.interpret_results(notebook, past_analyses)
+                            # Log the interpretation
+                            self.logger.log_response(results_interpretation, "results_interpretation")
+                            # Add interpretation as a markdown cell
+                            interpretation_cell = nbf.v4.new_markdown_cell(f"### Agent Interpretation\n\n{results_interpretation}")
+                            notebook.cells.append(interpretation_cell)
                             break
                         else:
                             print(f"  ❌ Fix attempt {fix_attempt} failed")
@@ -468,7 +481,12 @@ class AnalysisAgent:
                             if fix_attempt == max_fix_attempts:
                                 print(f"  ⚠️ Failed to fix after {max_fix_attempts} attempts. Moving to next iteration.")
                                 results_interpretation = "Current analysis step failed to run. Try an alternative approach"
-                    results_interpretation = self.interpret_results(notebook, past_analyses)
+                                interpretation_cell = nbf.v4.new_markdown_cell(f"### Agent Interpretation\n\n{results_interpretation}")
+                                notebook.cells.append(interpretation_cell)
+                    if not results_interpretation:  # Only get interpretation if we haven't set the failure message
+                        results_interpretation = self.interpret_results(notebook, past_analyses)
+                        interpretation_cell = nbf.v4.new_markdown_cell(f"### Agent Interpretation\n\n{results_interpretation}")
+                        notebook.cells.append(interpretation_cell)
 
                 analysis = {"hypothesis": hypothesis, "analysis_plan": analysis_plan, "first_step_code": current_code}
                 next_step_analysis = self.generate_next_step_analysis(analysis, past_analyses, notebook.cells, results_interpretation)
@@ -488,6 +506,47 @@ class AnalysisAgent:
                 
                 # Update the code memory with the new cell
                 self.update_code_memory(notebook.cells)
+
+            ### Execute the FINAL cell ###
+            success, error_msg, notebook = self.execute_notebook(notebook, past_analyses)
+            if success:
+                results_interpretation = self.interpret_results(notebook, past_analyses)
+                # Log the interpretation
+                self.logger.log_response(results_interpretation, "results_interpretation")
+                # Add interpretation as a markdown cell
+                interpretation_cell = nbf.v4.new_markdown_cell(f"### Agent Interpretation\n\n{results_interpretation}")
+                notebook.cells.append(interpretation_cell)
+            else:
+                print(f"⚠️ Final cell execution failed with: {error_msg}")
+                fix_attempt, fix_successful = 0, False
+                results_interpretation = None
+                while fix_attempt < max_fix_attempts and not fix_successful:
+                    fix_attempt += 1
+                    print(f"  🔧 Fix attempt {fix_attempt}/{max_fix_attempts}")
+
+                    current_code = self.fix_code(current_code, error_msg)
+                    notebook.cells[-1] = nbf.v4.new_code_cell(current_code)
+
+                    success, error_msg, notebook = self.execute_notebook(notebook, past_analyses)
+
+                    if success:
+                        fix_successful = True
+                        print(f"  ✅ Fix successful on attempt {fix_attempt}")
+                        results_interpretation = self.interpret_results(notebook, past_analyses)
+                        # Log the interpretation
+                        self.logger.log_response(results_interpretation, "results_interpretation")
+                        # Add interpretation as a markdown cell
+                        interpretation_cell = nbf.v4.new_markdown_cell(f"### Agent Interpretation\n\n{results_interpretation}")
+                        notebook.cells.append(interpretation_cell)
+                        break
+                    else:
+                        print(f"  ❌ Fix attempt {fix_attempt} failed")
+
+                        if fix_attempt == max_fix_attempts:
+                            print(f"  ⚠️ Failed to fix after {max_fix_attempts} attempts.")
+                            results_interpretation = "Final analysis step failed to run."
+                            interpretation_cell = nbf.v4.new_markdown_cell(f"### Agent Interpretation\n\n{results_interpretation}")
+                            notebook.cells.append(interpretation_cell)
 
             # Save the notebook
             notebook_path = os.path.join(self.output_dir, f"{self.analysis_name}_analysis_{analysis_idx+1}.ipynb")
