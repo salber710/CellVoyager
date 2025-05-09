@@ -6,14 +6,14 @@ from logging.handlers import RotatingFileHandler
 class Logger:
     """Minimalist logger to track prompts and analysis outputs"""
     
-    def __init__(self, log_dir="logs"):
+    def __init__(self, analysis_name, log_dir="logs"):
         # Create log directory if it doesn't exist
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
             
         # Create timestamp for this run
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.log_file = os.path.join(log_dir, f"agent_log_{timestamp}.log")
+        self.log_file = os.path.join(log_dir, f"{analysis_name}_log_{timestamp}.log")
         
         # Set up logger
         self.logger = logging.getLogger("agent_logger")
