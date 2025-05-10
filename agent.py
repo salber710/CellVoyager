@@ -12,6 +12,7 @@ import datetime
 from logger import Logger
 import base64
 import h5py
+from h5py import Dataset, Group
 
 AVAILABLE_PACKAGES = "scanpy, scvi-tools, scVelo, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy"
 class AnalysisAgent:
@@ -89,20 +90,33 @@ class AnalysisAgent:
                 # Decode the column name if it's bytes
                 k = raw_k.decode('utf-8') if isinstance(raw_k, bytes) else raw_k
                 
-                data = f['obs'][raw_k][:]
+                item = f['obs'][raw_k]
+                if isinstance(item, Dataset):
+                    data = item[:]
+                elif isinstance(item, Group) and \
+                    'codes' in item.keys() and 'categories' in item.keys():
+                    data = item['codes'][:]
+                    categories = item['categories'][:]
+                    categories = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in categories]
+                    data = pd.Categorical.from_codes(
+                        data.astype(int) if not np.issubdtype(data.dtype, np.integer) else data,
+                        categories=categories
+                    )
+                else:
+                    raise ValueError(f'uwu didnt account for this datatype in h5ad: {type(item)}')
                 
                 # Handle categorical data
-                if 'categories' in f['obs'][raw_k].attrs:
+                if 'categories' in item.attrs:
                     try:
                         # Get category values (handling references if needed)
-                        cat_ref = f['obs'][raw_k].attrs['categories']
+                        cat_ref = item.attrs['categories']
                         if isinstance(cat_ref, h5py.h5r.Reference):
                             # Dereference to get categories
                             cat_vals = f[cat_ref][:]
                             categories = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in cat_vals]
                         else:
                             # Normal categories
-                            cat_vals = f['obs'][raw_k].attrs['categories'][:]
+                            cat_vals = cat_ref[:]
                             categories = [x.decode('utf-8') if isinstance(x, bytes) else str(x) for x in cat_vals]
                         
                         # Create categorical data
