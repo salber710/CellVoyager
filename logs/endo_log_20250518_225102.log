@@ -1,0 +1,1649 @@
+
+
+================================================================================
+2025-05-18 22:51:02,745 - INFO
+================================================================================
+Logging started. Log file: logs/endo_log_20250518_225102.log
+
+
+================================================================================
+2025-05-18 22:51:03,189 - INFO
+================================================================================
+PROMPT: Initial Analysis (user)
+
+You will be provided a summary of a research paper as well as a set of computational analyses that were previously attempted for the given single-cell transcriptomic Andata dataset.
+Your role is to provide a new computational analysis plan that is completely distinct from the analyses in the paper AND from those that were previously attempted.
+Propose analyses that you think are missing from the paper. Ensure these are standard single-cell analyses.
+Specifically, you will return a hypothesis, a series of analysis steps towards testing that hypothesis, and finally the python code for executing the first analysis step.
+
+Ensure that your output is in the specified JSON format.
+
+Guidelines for constructing the analyses:
+    1. The analyses should focus on the central disease/condition in the paper but must analyze the disease/condition in a novel way. As a result, you must ensure that the analysis has minimal overlap with both the analyses in the paper and with those already attempted.
+    2. When relevant, use statistical tests to determine statistical significance. Ensure that you are printing the results of these
+    3. When relevant, create figures of your results. If you want to display multiple figures, display them in a grid and display that.
+    4. For analyses that depend on celltype, look at each celltype separately. Focus on the celltypes that you think will be most relevant.
+    5. For suggesting novel analyses not present in the paper, focus on using new computational methods, looking at new celltypes/genes/features, and finding new ways to visualize the dataset.
+    6. Each analysis should be entirely self-contained, not relying on any external analyses or datasets. It should be able to be run without changing anything.
+    7. You can only use the following Python packages: scanpy, scvi, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy. DO NOT USE ANY OTHER PACKAGES.
+    8. Make sure to only use data found in the anndata object. Take advantage of as much of the metadata information as possible.
+    9. The path to the anndata object is /scratch/users/salber/endo_data.h5ad
+    10. The analysis should be focused on one core goal/hypothesis. It should not branch out from this significantly. 
+    11. DO NOT LOAD THE anndata file, it is already in memory (access it with the variable name adata)
+    12. Display all figures. Never same them to a file.
+    13. The analyses should be standard and should be analyses you think the paper missed.
+
+Here is a summary of core single-cell analyses commonly done with the python libraries available to you:
+## Dimensionality Reduction
+Purpose: Embed high-dimensional gene expression into lower dimensions for visualization and analysis.
+
+Non-linear Embeddings: Further reduce to 2D/3D for visualization using t-SNE or UMAP. Scanpy provides sc.tl.umap(adata) (via UMAP) and sc.tl.tsne(adata). These use the neighborhood graph (see below) to embed cells so that similar cells cluster together. For example, after sc.pp.neighbors, call sc.tl.umap(adata). Alternative embeddings include diffusion map (sc.tl.diffmap) or force-directed graph (sc.tl.draw_graph), though the latter are less commonly used now.
+
+Latent Embedding (scVI): As an advanced dimensionality reduction, the SCVI model produces a probabilistic latent space. After training SCVI, extract latent = model.get_latent_representation() and store it (e.g. in adata.obsm['X_scVI']). These latent coordinates can be used instead of PCA for UMAP/t-SNE or clustering, often yielding better batch correction or representation of complex structure
+
+## Neighborhood Graph Construction
+Purpose: Build a k-nearest-neighbor graph of cells as input for clustering and visualization.
+sc.pp.neighbors: Compute the kNN graph on the chosen low-dimensional representation (PCA or latent) with sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30). This populates adata.obsp['connectivities'] and adata.obsp['distances']. The graph defines edges between similar cells. Parameters include n_neighbors, distance metric, and which embedding to use (via use_rep or default PCA).
+Graph-based Refinements: Additional options allow customizing neighbor computation (e.g. method='umap' vs 'rapids-ann', etc.), but defaults suffice for most use cases. The neighbors graph underlies downstream UMAP/t-SNE and clustering. For example, sc.pp.neighbors(adata) is typically run before sc.tl.umap(adata)
+
+
+## Clustering
+Purpose: Identify groups of similar cells (e.g. cell types or states) in an unsupervised way.
+Leiden Algorithm: A common approach is to use community detection on the kNN graph. Scanpy’s sc.tl.leiden(adata, resolution=1.0, key_added='leiden') partitions cells into clusters (stored in adata.obs['leiden']). Leiden is an improved version of Louvain and requires the neighbors graph to be precomputed. The resolution parameter controls cluster granularity (higher → more clusters).
+Louvain Algorithm: Alternatively, use sc.tl.louvain(adata), which applies the Louvain method. It also depends on sc.pp.neighbors. Both algorithms label clusters in adata.obs.
+Cluster Options: Both Leiden and Louvain can be run with different seeds or restrictions (e.g. restrict_to a subset of obs categories). One can also iterate clustering at multiple resolutions to explore structure.
+Hierarchical Dendrogram (Optional): After clustering, Scanpy can build a dendrogram of cluster relationships with sc.tl.dendrogram(adata, groupby='leiden'), which stores a linkage in adata.uns and can be plotted with sc.pl.dendrogram. This helps interpret cluster similarities.
+Result: The output is a categorical label per cell (e.g. adata.obs['leiden']) representing inferred clusters/cell groups. These are often interpreted as putative cell types or subpopulations.
+
+
+## Trajectory and Pseudotime Analysis
+Purpose: Model continuous developmental or differentiation processes.
+Diffusion Pseudotime (DPT): Scanpy includes sc.tl.dpt(adata, n_dcs=10) to compute a diffusion-based pseudotemporal ordering. One must pick a “root” cell or cluster (often the presumed progenitor); DPT then assigns each cell a pseudotime (adata.obs['dpt_pseudotime']) based on diffusion distance from the root. This creates an ordering reflecting smooth transitions.
+Partition-based Graph Abstraction (PAGA): PAGA computes a coarse-grained connectivity graph between clusters. Using sc.tl.paga(adata, groups='leiden'), one obtains adata.uns['paga'], where edges between clusters have confidence weights. Plotting sc.pl.paga(adata, threshold=0.03) shows a simplified graph of cluster relations. PAGA can also be used to initialize UMAP (sc.tl.umap(adata, init_pos='paga')) for embeddings faithful to overall topology
+
+
+## Differential Expression and Marker Gene Detection
+Purpose: Identify genes that are characteristic of clusters or conditions.
+Rank Genes per Group: Use sc.tl.rank_genes_groups to perform marker analysis. Given adata.obs[groupby] (e.g. 'leiden'), this compares each group to others (or pairwise) and ranks genes by statistical tests. Methods include t-test, Welch’s t-test, Wilcoxon, or logistic regression (method='logreg'). For example, sc.tl.rank_genes_groups(adata, 'leiden', method='wilcoxon') fills adata.uns['rank_genes_groups'] with names, scores, p-values, and log-fold changes for top markers of each cluster. One can customize the test (e.g. method='logreg' for sparse markers). Results can be visualized with sc.pl.rank_genes_groups_heatmap or sc.pl.rank_genes_groups_dotplot.
+Logistic Regression (Alternative): Setting method='logreg' performs logistic regression classification for each gene (as in Ntranos et al., 2019). It often yields robust marker sets.
+SCVI Differential Expression: The trained SCVI model provides model.differential_expression, which can test for differentially expressed genes between groups of cells in a probabilistic framework. For example, model.differential_expression(groupby="cell_type", group1="A", group2="B") returns a dataframe of DE statistics. SCVI supports 1-vs-1 or 1-vs-all testing. This method accounts for model uncertainty and can be more powerful in large datasets.
+
+
+## Gene Signature Scoring
+Purpose: Quantify the expression of gene sets (e.g. cell-cycle genes, pathways) per cell.
+General Gene Set Scoring: sc.tl.score_genes(adata, gene_list, score_name="score") computes the average expression of a set of genes (minus average of random reference genes) for each cell. The result is added to adata.obs['score_name']. This can reflect pathway activity or other signatures.
+Cell-Cycle Scoring: A specialized function sc.tl.score_genes_cell_cycle(adata, s_genes, g2m_genes) takes lists of S-phase and G2M-phase marker genes and assigns each cell an S_score, G2M_score, and a categorical phase (G1, S, or G2M). This is useful to regress out or analyze cell-cycle effects.
+Options: Gene lists (e.g. provided with Scanpy, or user-defined) can be passed. The scoring considers control gene sets (by default) to normalize the scores. Cells are labeled by dominant phase if desired.
+
+## Visualization
+Purpose: Plot results (embeddings, marker expression, QC) to interpret data.
+Embedding Plots: sc.pl.umap(adata, color=[...]) or sc.pl.tsne(...) plot the 2D embedding, coloring points by cluster, sample, or gene expression. For example, sc.pl.umap(adata, color=['leiden', 'n_genes_by_counts']). sc.pl.draw_graph (force layout) and sc.pl.paga (PAGA graph) are also available. Many sc.pl functions return Matplotlib axes if show=False.
+QC and Metadata Plots: sc.pl.violin(adata, keys, ...) creates violin plots per group (e.g. distribution of counts or gene expression across clusters). In the QC tutorial, Scanpy shows violin plots of total counts and mitochondrial percentage. sc.pl.scatter(adata, x, y, color=...) makes 2D scatter (e.g. total_counts vs n_genes).
+Marker Gene Plots: Once clusters are defined, visualizing marker genes is key. Common plots include dotplots, heatmaps, and violin plots of cluster markers. For example, sc.pl.dotplot(adata, var_names, groupby='leiden') shows mean expression (color) and percent expressed (dot size) of selected genes per cluster. Similarly, sc.pl.matrixplot is a heatmap variant. The core plotting tutorial demonstrates dotplots and violin plots for cluster markers.
+Gene Expression Distributions: sc.pl.violin(adata, gene_list, groupby='leiden') and sc.pl.stacked_violin show the distribution of one or more genes across clusters.
+Clustered Heatmaps: sc.pl.heatmap can display expression of marker genes across clusters. sc.pl.clustermap (wrapper around Seaborn) can cluster cells/genes in a heatmap, often using raw or log counts.
+Pathway/Gene Set Plots: Custom heatmaps or barplots using Matplotlib/Seaborn can be made from gene scores or DE results (using Pandas/NumPy to extract data). Scanpy’s plots cover most scRNA needs, but any Matplotlib/Seaborn function can be used on data from adata.obs, adata.var, or adata.layers. For example, one might use sns.clustermap on a subset of adata.X.
+
+
+
+For the analysis plan, think of the analysis plan as a scientific workflow:
+    1. Start with exploratory data analysis that is broad and tests many things
+    2. Then, focus on the more promising results from the exploratory phase by creating more focused analyses
+    3. Include statistical validation of your results where appropiate
+Do not number the analysis plan.
+Each step in the analysis plan should be distinct from one another and could involve loading the data, conducting a statistical analysis, printing information about the AnnData object, etc.
+Use however many steps is appropiate, but go for at least 5 steps. 
+
+You are given the following summary of the anndata object:
+Below is a description of the columns in adata.obs: 
+Column cell_name contains the values ['14_AAACCCAAGTAATACG' '14_AAACCCAGTCCTTAAG' '14_AAACGAAAGGCGATAC'
+ '14_AAACGCTAGACTGTTC' '14_AAACGCTAGAGTGTTA' '14_AAACGCTAGTCTAGCT'
+ '14_AAACGCTGTTGTGGCC' '14_AAACGCTTCTTGCAGA' '14_AAAGAACAGCTCCGAC'
+ '14_AAAGAACAGGTACTGG'] 
+Column cell_type contains the values ['Ciliated' 'Endothelia' 'Lymphocytes' 'Macrophages' 'Smooth muscle cells'
+ 'Stromal fibroblasts' 'Unciliated epithelia' 'Unciliated epithelia 1'
+ 'Unciliated epithelia 2'] 
+Column dataset contains the values ['10x' 'C1'] 
+Column day contains the values [ 4  7  9 10 11 15 16 17 19 20] 
+Column donor contains the values [ 4  5  6  7  8 11 12 13 14 15] 
+
+
+Here are the previous analyses attempted:
+
+
+Here is a summary of the research paper:
+Biological background  
+This study focuses on the human endometrium—a dynamic tissue that undergoes cyclical remodeling, shedding, and regeneration during the menstrual cycle. These dramatic transformations are central to reproductive physiology, as they underlie fertility and the establishment of a receptive state for embryo implantation known as the window of implantation (WOI). The biological background of the study is rooted in understanding how different cell types within the endometrium change their gene expression profiles over the cycle, how these changes regulate tissue homeostasis, and how failures or deviations in these processes might be linked to fertility issues and endometrial diseases.
+
+Biological background  
+Relevant biological questions include deciphering the molecular signatures that define each phase of the menstrual cycle, particularly the abrupt transcriptional activation that marks the opening of the WOI. The investigation also centers on the mechanisms behind cellular differentiation, decidualization of stromal fibroblasts, and the interplay among various cell types—including ciliated and unciliated epithelial cells, stromal fibroblasts, endothelial cells, immune cells, and smooth muscle cells. This enhanced resolution of cellular heterogeneity paves the way for better understanding of normal reproductive physiology and provides a baseline reference for studying endometrial pathologies.
+
+Paper’s computational analyses  
+The authors began their investigation by applying dimensional reduction techniques (t-distributed stochastic neighbor embedding, or t-SNE, and uniform manifold approximation, UMAP) on single-cell RNA sequencing data generated using the Fluidigm C1 platform and validated with the 10x Chromium system. They analyzed 2,148 cells from 19 healthy donors, identifying clear segregation into distinct groups. Differential expression analysis and density-based clustering revealed six major cell types—stromal fibroblasts, endothelial cells, macrophages, lymphocytes, unciliated epithelium, and a previously uncharacterized ciliated epithelium. In the 10x dataset of over 71,000 cells, an additional smooth muscle cell type was uncovered. The identification and characterization of these cell types, using canonical markers and newly discovered discriminatory genes (e.g., those marking ciliated epithelium), provide a comprehensive cellular atlas of the endometrium.
+
+Paper’s computational analyses  
+Next, the study employed a mutual information (MI)–based approach to build a pseudotime trajectory that connected cellular transcriptomic states across the menstrual cycle within the major endometrial cell types. By selecting “time-associated” genes, the researchers generated principal curves in t-SNE space to order cells along a continuous trajectory. This analysis revealed four distinct phases for both unciliated epithelial cells and stromal fibroblasts. A striking finding was that unciliated epithelia displayed an abrupt, discontinuous transition in gene expression—marked by a rapid activation of a specific gene module that includes PAEP, GPX3, and CXCL14—corresponding to the opening of the WOI. In contrast, stromal fibroblasts showed a more gradual transition with modular upregulation of decidualization markers, underscoring different dynamics in epithelial versus stromal compartment transitions.
+
+Paper’s computational analyses  
+Further detailed analyses focused on unraveling finer cellular heterogeneity and regulatory mechanisms. The unciliated epithelium was deconvoluted into glandular and luminal subtypes based on differential expression of genes such as WNT7A, LGR5, and FOXA2; these markers correspond to previously documented differences in anatomical function and remodeling during the cycle. Additionally, the study characterized global transcription factor dynamics and secreted protein profiles by clustering dynamically expressed genes in both cell types. The team applied gene ontology enrichment to relate these expression patterns to processes like differentiation, endoplasmic reticulum stress, and morphogenesis. Parallel cell cycle analyses using canonical G1/S and G2/M gene sets helped identify proliferative versus secretory phases, confirming that the transition from a high-cycling state to a quiescent, receptive state occurs between phases in both epithelia and stromal fibroblasts, thereby linking transcriptomic signatures with histological observations.
+
+Paper’s dataset description  
+The dataset comprises multi-platform single-cell transcriptomic profiles derived from human endometrial biopsies collected from healthy ovum donors during a natural menstrual cycle. Specifically, 19 donors contributed samples to the Fluidigm C1 dataset (2,148 cells), while an independent validation set of ten donors was profiled using the 10x Chromium system (over 71,000 cells). Alongside cell-type–specific gene expression counts, the dataset includes metadata such as day of menstrual cycle, phase assignments based on both transcriptomic and histological criteria, and spatial data from RNAscope and immunofluorescence imaging. This rich combinatorial dataset connects molecular signatures to key reproductive events like the WOI and decidualization, serving as an essential resource for understanding normal endometrial physiology and providing a baseline for future studies on endometrial diseases and fertility treatments.
+
+
+================================================================================
+2025-05-18 22:51:28,506 - INFO
+================================================================================
+RESPONSE/OUTPUT: initial_analysis
+
+Hypothesis: The composition and activation state of endometrial lymphocytes change dynamically across the menstrual cycle, with a transient enrichment of cytotoxic NK-like cells and heightened cytotoxic gene programs near the window of implantation.
+
+Analysis Plan:
+1. Subset the dataset to cells annotated as “Lymphocytes”, integrate donor effects with an scVI latent model, and embed cells in this corrected space for downstream analyses.
+2. Perform Leiden clustering on the scVI latent space, build a UMAP for visualization, and annotate clusters with CellTypist to distinguish NK, CD4 T, CD8 T, and B-cell subsets.
+3. Quantify the relative abundance of each lymphocyte subtype across cycle day (or binned cycle phase) and test for significant day-dependent shifts using χ² or Cochran–Armitage trend tests.
+4. Compute a cytotoxic gene-set score (e.g., GZMB, PRF1, NKG7, GNLY, KLRD1) for every lymphocyte and compare score distributions across days with Kruskal–Wallis tests and violin plots per subtype.
+5. Within the NK-annotated cluster, run scVI’s built-in differential expression to identify genes up- or down-regulated between early-cycle (days 4–9) and mid-secretory/WOI (days 15–19) cells, visualizing top hits with dot plots.
+
+Initial Code:
+import scanpy as sc
+import scvi
+
+# 1. Isolate lymphocytes
+lymphocytes = adata[adata.obs['cell_type'] == 'Lymphocytes'].copy()
+
+# 2. Set up and train an scVI model correcting for donor batch
+scvi.data.setup_anndata(lymphocytes, batch_key='donor')
+model = scvi.model.SCVI(lymphocytes, n_latent=20, n_layers=2)
+model.train(max_epochs=400, early_stopping=True)
+
+# 3. Store the latent representation for later steps
+lymphocytes.obsm['X_scVI'] = model.get_latent_representation()
+print('scVI latent representation stored in lymphocytes.obsm[\'X_scVI\'] with shape', lymphocytes.obsm['X_scVI'].shape)
+
+
+================================================================================
+2025-05-18 22:52:27,924 - INFO
+================================================================================
+PROMPT: Incorporate Critiques (user)
+
+You will be given a hypothesis, analysis plan, and the python code for the first step in that analysis plan.
+You will also be given feedback for these components. Your role is to incorporate that feedback and update these components.
+
+Analysis Hypothesis:
+The composition and activation state of endometrial lymphocytes change dynamically across the menstrual cycle, with a transient enrichment of cytotoxic NK-like cells and heightened cytotoxic gene programs near the window of implantation.
+
+Analysis Plan:
+['Subset the dataset to cells annotated as “Lymphocytes”, integrate donor effects with an scVI latent model, and embed cells in this corrected space for downstream analyses.', 'Perform Leiden clustering on the scVI latent space, build a UMAP for visualization, and annotate clusters with CellTypist to distinguish NK, CD4 T, CD8 T, and B-cell subsets.', 'Quantify the relative abundance of each lymphocyte subtype across cycle day (or binned cycle phase) and test for significant day-dependent shifts using χ² or Cochran–Armitage trend tests.', 'Compute a cytotoxic gene-set score (e.g., GZMB, PRF1, NKG7, GNLY, KLRD1) for every lymphocyte and compare score distributions across days with Kruskal–Wallis tests and violin plots per subtype.', 'Within the NK-annotated cluster, run scVI’s built-in differential expression to identify genes up- or down-regulated between early-cycle (days 4–9) and mid-secretory/WOI (days 15–19) cells, visualizing top hits with dot plots.']
+
+Code for first step in analysis plan:
+import scanpy as sc
+import scvi
+
+# 1. Isolate lymphocytes
+lymphocytes = adata[adata.obs['cell_type'] == 'Lymphocytes'].copy()
+
+# 2. Set up and train an scVI model correcting for donor batch
+scvi.data.setup_anndata(lymphocytes, batch_key='donor')
+model = scvi.model.SCVI(lymphocytes, n_latent=20, n_layers=2)
+model.train(max_epochs=400, early_stopping=True)
+
+# 3. Store the latent representation for later steps
+lymphocytes.obsm['X_scVI'] = model.get_latent_representation()
+print('scVI latent representation stored in lymphocytes.obsm[\'X_scVI\'] with shape', lymphocytes.obsm['X_scVI'].shape)
+
+Feedback:
+Feedback on analysis plan
+• Novelty: Focusing on dynamic lymphocyte composition and cytotoxic programs is largely unaddressed in the paper, so the plan is acceptable.  
+• Statistical design:  
+  – Use donor-level aggregation when testing abundance changes (e.g., compute % subtype per donor-day and apply Cochran–Armitage or a mixed-effects logistic regression) to avoid pseudo-replication.  
+  – For Kruskal–Wallis on gene-set scores, follow with post-hoc Dunn tests and Benjamini–Hochberg correction.  
+• Gene-set scoring: Explicitly list the background genes or keep default random control sets to avoid bias.  
+• Day binning: Clearly define phase bins (e.g., proliferative = 4–9, early-secretory = 10–14, mid-secretory = 15–19). Use the same bins in all downstream tests.  
+• Multiple testing: State that DE genes will be FDR-corrected (e.g., q < 0.05).  
+• CellTypist: Pick an immune-focused model (‘Immune_All_Low.pkl’) for better sub-typing, and record per-cell prediction probability to flag low-confidence labels.  
+• Confounder control: For cytotoxic score and DE, adjust for donor as a covariate or stratify by donor to avoid confounding.  
+• Visualization: Plan which plots to show (UMAP colored by subtype & day, barplots of subtype fractions, violin of scores, DE dotplot).  
+• Reproducibility: Fix random seeds for scVI and Leiden (model.train(..., seed=0); sc.tl.leiden(..., random_state=0)).  
+• Power check: Verify lymphocyte cell counts per day before running tests; if sparse, merge adjacent days.
+
+Feedback on first-step code
+1. Subsetting  
+   – Account for categorical string mismatch/whitespace: `adata.obs['cell_type'].str.strip() == 'Lymphocytes'`.  
+   – Add sanity check: `assert lymphocytes.n_obs > 0, "No lymphocytes found"`.  
+2. Setup/anndata  
+   – Preserve raw counts for downstream DE: `lymphocytes.raw = lymphocytes`.  
+   – Consider including `layer='counts'` if raw counts stored in a layer.  
+3. scVI model  
+   – Pass `gene_likelihood='nb'` only if needed; defaults are fine.  
+   – Fix randomness: `model = scvi.model.SCVI(..., n_latent=20, n_layers=2, latent_distribution='normal', seed=0)`.  
+   – `early_stopping=True` is deprecated; use `train(max_epochs=400, early_stopping=True, early_stopping_patience=20, plan_kwargs={"weight_decay":0.0})` or omit early stopping.  
+   – Print `model.history['elbo_train'].iloc[-1]` to monitor convergence.  
+4. Hardware / speed  
+   – Detect GPU (`device='cuda' if torch.cuda.is_available() else 'cpu'`) and pass to `model.to_device`.  
+5. Latent extraction  
+   – After `get_latent_representation`, also store in `uns['scvi_latent_info']` the model settings for provenance.  
+   – Use a more descriptive key: `lymphocytes.obsm['X_scVI_20d']`.  
+6. Memory safety  
+   – Avoid leaving large adata copies in scope; delete intermediate objects or use `del` if memory is constrained.
+
+Minor style / readability  
+• Follow PEP-8: blank line between imports and code blocks, lowercase variable names (`lymphocytes_adata`), and add inline comments capped at 72 chars.  
+• Remove the trailing backslash in print and use f-string:  
+  `print(f"Stored scVI latent: {lymphocytes.obsm['X_scVI'].shape}")`.
+
+Edge cases  
+• If donor column is numeric, cast to string before setup (`lymphocytes.obs['donor'] = lymphocytes.obs['donor'].astype(str)`) because scVI expects categorical dtype.
+
+Guidelines for constructing the analyses:
+    1. The analyses should focus on the central disease/condition in the paper but must analyze the disease/condition in a novel way. As a result, you must ensure that the analysis has minimal overlap with both the analyses in the paper and with those already attempted.
+    2. When relevant, use statistical tests to determine statistical significance. Ensure that you are printing the results of these
+    3. When relevant, create figures of your results. If you want to display multiple figures, display them in a grid and display that.
+    4. For analyses that depend on celltype, look at each celltype separately. Focus on the celltypes that you think will be most relevant.
+    5. For suggesting novel analyses not present in the paper, focus on using new computational methods, looking at new celltypes/genes/features, and finding new ways to visualize the dataset.
+    6. Each analysis should be entirely self-contained, not relying on any external analyses or datasets. It should be able to be run without changing anything.
+    7. You can only use the following Python packages: scanpy, scvi, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy. DO NOT USE ANY OTHER PACKAGES.
+    8. Make sure to only use data found in the anndata object. Take advantage of as much of the metadata information as possible.
+    9. The path to the anndata object is /scratch/users/salber/endo_data.h5ad
+    10. The analysis should be focused on one core goal/hypothesis. It should not branch out from this significantly. 
+    11. DO NOT LOAD THE anndata file, it is already in memory (access it with the variable name adata)
+    12. Display all figures. Never same them to a file.
+    13. The analyses should be standard and should be analyses you think the paper missed.
+
+Here is a summary of core single-cell analyses commonly done with the python libraries available to you:
+## Dimensionality Reduction
+Purpose: Embed high-dimensional gene expression into lower dimensions for visualization and analysis.
+
+Non-linear Embeddings: Further reduce to 2D/3D for visualization using t-SNE or UMAP. Scanpy provides sc.tl.umap(adata) (via UMAP) and sc.tl.tsne(adata). These use the neighborhood graph (see below) to embed cells so that similar cells cluster together. For example, after sc.pp.neighbors, call sc.tl.umap(adata). Alternative embeddings include diffusion map (sc.tl.diffmap) or force-directed graph (sc.tl.draw_graph), though the latter are less commonly used now.
+
+Latent Embedding (scVI): As an advanced dimensionality reduction, the SCVI model produces a probabilistic latent space. After training SCVI, extract latent = model.get_latent_representation() and store it (e.g. in adata.obsm['X_scVI']). These latent coordinates can be used instead of PCA for UMAP/t-SNE or clustering, often yielding better batch correction or representation of complex structure
+
+## Neighborhood Graph Construction
+Purpose: Build a k-nearest-neighbor graph of cells as input for clustering and visualization.
+sc.pp.neighbors: Compute the kNN graph on the chosen low-dimensional representation (PCA or latent) with sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30). This populates adata.obsp['connectivities'] and adata.obsp['distances']. The graph defines edges between similar cells. Parameters include n_neighbors, distance metric, and which embedding to use (via use_rep or default PCA).
+Graph-based Refinements: Additional options allow customizing neighbor computation (e.g. method='umap' vs 'rapids-ann', etc.), but defaults suffice for most use cases. The neighbors graph underlies downstream UMAP/t-SNE and clustering. For example, sc.pp.neighbors(adata) is typically run before sc.tl.umap(adata)
+
+
+## Clustering
+Purpose: Identify groups of similar cells (e.g. cell types or states) in an unsupervised way.
+Leiden Algorithm: A common approach is to use community detection on the kNN graph. Scanpy’s sc.tl.leiden(adata, resolution=1.0, key_added='leiden') partitions cells into clusters (stored in adata.obs['leiden']). Leiden is an improved version of Louvain and requires the neighbors graph to be precomputed. The resolution parameter controls cluster granularity (higher → more clusters).
+Louvain Algorithm: Alternatively, use sc.tl.louvain(adata), which applies the Louvain method. It also depends on sc.pp.neighbors. Both algorithms label clusters in adata.obs.
+Cluster Options: Both Leiden and Louvain can be run with different seeds or restrictions (e.g. restrict_to a subset of obs categories). One can also iterate clustering at multiple resolutions to explore structure.
+Hierarchical Dendrogram (Optional): After clustering, Scanpy can build a dendrogram of cluster relationships with sc.tl.dendrogram(adata, groupby='leiden'), which stores a linkage in adata.uns and can be plotted with sc.pl.dendrogram. This helps interpret cluster similarities.
+Result: The output is a categorical label per cell (e.g. adata.obs['leiden']) representing inferred clusters/cell groups. These are often interpreted as putative cell types or subpopulations.
+
+
+## Trajectory and Pseudotime Analysis
+Purpose: Model continuous developmental or differentiation processes.
+Diffusion Pseudotime (DPT): Scanpy includes sc.tl.dpt(adata, n_dcs=10) to compute a diffusion-based pseudotemporal ordering. One must pick a “root” cell or cluster (often the presumed progenitor); DPT then assigns each cell a pseudotime (adata.obs['dpt_pseudotime']) based on diffusion distance from the root. This creates an ordering reflecting smooth transitions.
+Partition-based Graph Abstraction (PAGA): PAGA computes a coarse-grained connectivity graph between clusters. Using sc.tl.paga(adata, groups='leiden'), one obtains adata.uns['paga'], where edges between clusters have confidence weights. Plotting sc.pl.paga(adata, threshold=0.03) shows a simplified graph of cluster relations. PAGA can also be used to initialize UMAP (sc.tl.umap(adata, init_pos='paga')) for embeddings faithful to overall topology
+
+
+## Differential Expression and Marker Gene Detection
+Purpose: Identify genes that are characteristic of clusters or conditions.
+Rank Genes per Group: Use sc.tl.rank_genes_groups to perform marker analysis. Given adata.obs[groupby] (e.g. 'leiden'), this compares each group to others (or pairwise) and ranks genes by statistical tests. Methods include t-test, Welch’s t-test, Wilcoxon, or logistic regression (method='logreg'). For example, sc.tl.rank_genes_groups(adata, 'leiden', method='wilcoxon') fills adata.uns['rank_genes_groups'] with names, scores, p-values, and log-fold changes for top markers of each cluster. One can customize the test (e.g. method='logreg' for sparse markers). Results can be visualized with sc.pl.rank_genes_groups_heatmap or sc.pl.rank_genes_groups_dotplot.
+Logistic Regression (Alternative): Setting method='logreg' performs logistic regression classification for each gene (as in Ntranos et al., 2019). It often yields robust marker sets.
+SCVI Differential Expression: The trained SCVI model provides model.differential_expression, which can test for differentially expressed genes between groups of cells in a probabilistic framework. For example, model.differential_expression(groupby="cell_type", group1="A", group2="B") returns a dataframe of DE statistics. SCVI supports 1-vs-1 or 1-vs-all testing. This method accounts for model uncertainty and can be more powerful in large datasets.
+
+
+## Gene Signature Scoring
+Purpose: Quantify the expression of gene sets (e.g. cell-cycle genes, pathways) per cell.
+General Gene Set Scoring: sc.tl.score_genes(adata, gene_list, score_name="score") computes the average expression of a set of genes (minus average of random reference genes) for each cell. The result is added to adata.obs['score_name']. This can reflect pathway activity or other signatures.
+Cell-Cycle Scoring: A specialized function sc.tl.score_genes_cell_cycle(adata, s_genes, g2m_genes) takes lists of S-phase and G2M-phase marker genes and assigns each cell an S_score, G2M_score, and a categorical phase (G1, S, or G2M). This is useful to regress out or analyze cell-cycle effects.
+Options: Gene lists (e.g. provided with Scanpy, or user-defined) can be passed. The scoring considers control gene sets (by default) to normalize the scores. Cells are labeled by dominant phase if desired.
+
+## Visualization
+Purpose: Plot results (embeddings, marker expression, QC) to interpret data.
+Embedding Plots: sc.pl.umap(adata, color=[...]) or sc.pl.tsne(...) plot the 2D embedding, coloring points by cluster, sample, or gene expression. For example, sc.pl.umap(adata, color=['leiden', 'n_genes_by_counts']). sc.pl.draw_graph (force layout) and sc.pl.paga (PAGA graph) are also available. Many sc.pl functions return Matplotlib axes if show=False.
+QC and Metadata Plots: sc.pl.violin(adata, keys, ...) creates violin plots per group (e.g. distribution of counts or gene expression across clusters). In the QC tutorial, Scanpy shows violin plots of total counts and mitochondrial percentage. sc.pl.scatter(adata, x, y, color=...) makes 2D scatter (e.g. total_counts vs n_genes).
+Marker Gene Plots: Once clusters are defined, visualizing marker genes is key. Common plots include dotplots, heatmaps, and violin plots of cluster markers. For example, sc.pl.dotplot(adata, var_names, groupby='leiden') shows mean expression (color) and percent expressed (dot size) of selected genes per cluster. Similarly, sc.pl.matrixplot is a heatmap variant. The core plotting tutorial demonstrates dotplots and violin plots for cluster markers.
+Gene Expression Distributions: sc.pl.violin(adata, gene_list, groupby='leiden') and sc.pl.stacked_violin show the distribution of one or more genes across clusters.
+Clustered Heatmaps: sc.pl.heatmap can display expression of marker genes across clusters. sc.pl.clustermap (wrapper around Seaborn) can cluster cells/genes in a heatmap, often using raw or log counts.
+Pathway/Gene Set Plots: Custom heatmaps or barplots using Matplotlib/Seaborn can be made from gene scores or DE results (using Pandas/NumPy to extract data). Scanpy’s plots cover most scRNA needs, but any Matplotlib/Seaborn function can be used on data from adata.obs, adata.var, or adata.layers. For example, one might use sns.clustermap on a subset of adata.X.
+
+
+
+You are given the following summary of the anndata object:
+Below is a description of the columns in adata.obs: 
+Column cell_name contains the values ['14_AAACCCAAGTAATACG' '14_AAACCCAGTCCTTAAG' '14_AAACGAAAGGCGATAC'
+ '14_AAACGCTAGACTGTTC' '14_AAACGCTAGAGTGTTA' '14_AAACGCTAGTCTAGCT'
+ '14_AAACGCTGTTGTGGCC' '14_AAACGCTTCTTGCAGA' '14_AAAGAACAGCTCCGAC'
+ '14_AAAGAACAGGTACTGG'] 
+Column cell_type contains the values ['Ciliated' 'Endothelia' 'Lymphocytes' 'Macrophages' 'Smooth muscle cells'
+ 'Stromal fibroblasts' 'Unciliated epithelia' 'Unciliated epithelia 1'
+ 'Unciliated epithelia 2'] 
+Column dataset contains the values ['10x' 'C1'] 
+Column day contains the values [ 4  7  9 10 11 15 16 17 19 20] 
+Column donor contains the values [ 4  5  6  7  8 11 12 13 14 15] 
+
+
+Here is the code from the last 3 steps. Make sure the modified code builds on the past analyses and doesn't repeat any of them:
+
+
+
+================================================================================
+2025-05-18 22:52:27,927 - INFO
+================================================================================
+RESPONSE/OUTPUT: revised_analysis
+
+Revised Hypothesis: Endometrial lymphocyte composition and activation state oscillate across the menstrual cycle, peaking with a transient enrichment of highly cytotoxic NK-like cells and elevated cytotoxic-gene programs during the mid-secretory window of implantation (days 15–19).
+
+Revised Analysis Plan:
+1. Subset cells annotated as Lymphocytes, preserve raw counts, cast donor IDs to string, and train an scVI model batch-corrected on donor to generate a 20-dimensional latent space (seed = 0) stored in obsm['X_scVI_20d'].
+2. Build a kNN graph on the scVI latent space, run Leiden clustering (resolution = 1.0, random_state = 0), compute a UMAP, and annotate clusters using CellTypist with the immune-focused ‘Immune_All_Low.pkl’ model; retain per-cell prediction probabilities to flag low-confidence labels.
+3. Aggregate subtype proportions per donor within cycle-phase bins (proliferative = 4–9, early-secretory = 10–14, mid-secretory = 15–19) and test for phase-dependent shifts using Cochran–Armitage trend tests and (if needed) donor-level mixed-effects logistic regression; visualize with stacked barplots and donor-overlayed dotplots.
+4. Compute a cytotoxic gene-set score (GZMB, PRF1, NKG7, GNLY, KLRD1) per cell with sc.tl.score_genes (default control gene sampling); compare score distributions across phase bins within each subtype using Kruskal–Wallis tests followed by Dunn post-hoc tests with Benjamini–Hochberg correction, optionally repeating on per-donor medians; display subtype-stratified violin plots.
+5. Within CellTypist-annotated NK cells, perform scVI differential expression between proliferative (4–9) and mid-secretory (15–19) phases while conditioning on donor; FDR-correct (q < 0.05) and visualize the top up- and down-regulated genes with dotplots, highlighting cytotoxic and implantation-relevant genes.
+
+Revised Code:
+import numpy as np
+import scanpy as sc
+import scvi
+
+# ------------------------------------------------------------------
+# Set global randomness for reproducibility
+np.random.seed(0)
+scvi.settings.seed = 0
+sc.settings.set_figure_params(dpi=80, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes and basic sanity checks
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found in the dataset."
+
+# Preserve raw counts for downstream differential expression
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes
+
+# Ensure donor is string-typed (required for scVI categorical handling)
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 2. scVI setup and model training (donor-batch correction)
+scvi.data.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=20,
+    n_layers=2,
+    seed=0,
+)
+model.train(max_epochs=400, early_stopping=True, early_stopping_patience=20)
+
+# ------------------------------------------------------------------
+# 3. Store the latent representation and model provenance
+lymphocytes.obsm["X_scVI_20d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "n_latent": 20,
+    "n_layers": 2,
+    "max_epochs": 400,
+    "seed": 0,
+    "batch_key": "donor",
+    "early_stopping": True,
+}
+
+print(f"Stored scVI latent with shape {lymphocytes.obsm['X_scVI_20d'].shape}")
+print(f"Final training ELBO: {model.history['elbo_train'].iloc[-1]:.2f}")
+
+
+================================================================================
+2025-05-18 23:06:15,385 - INFO
+================================================================================
+PROMPT: Incorporate Critiques (user)
+
+You will be given a hypothesis, analysis plan, and the python code for the first step in that analysis plan.
+You will also be given feedback for these components. Your role is to incorporate that feedback and update these components.
+
+Analysis Hypothesis:
+Endometrial lymphocytes undergo a progressive shift from an activated to an exhausted transcriptional program as the menstrual cycle advances, resulting in increasing expression of exhaustion markers (PDCD1, LAG3, HAVCR2, CTLA4, TIGIT) and declining transcriptional diversity toward the mid-secretory window of implantation (days 15–19).
+
+Analysis Plan:
+["Subset lymphocytes, remove extremely sparse genes (present in <20 cells) to reduce memory footprint, and retrain a compact scVI model (15-dimensional latent, 1 hidden layer, CPU) batch-corrected on donor; store embedding in obsm['X_scVI_15d'].", 'Construct a k-nearest-neighbor graph on the scVI latent space, run Leiden clustering (resolution = 0.8) and compute a UMAP; visualize UMAP colored by day, Leiden cluster, and donor to confirm batch correction.', 'Score each cell for an exhaustion gene set (PDCD1, LAG3, HAVCR2, CTLA4, TIGIT) and for an activation gene set (GZMB, PRF1, NKG7, GNLY, KLRD1); plot their distributions across cycle days and Leiden clusters; test monotonic trends with Spearman correlation and Cochran–Armitage trend tests on high-vs-low scorers.', 'Compute Shannon transcriptional entropy per cell (normalized gene expression) as a proxy for transcriptional diversity; assess correlation with cycle day and exhaustion score, and visualize on UMAP and with scatter plots.', 'Infer diffusion-based pseudotime (DPT) on the scVI graph using the earliest-day lymphocyte cluster as root; correlate pseudotime with exhaustion/activation scores and day, and stratify cells into early, mid, late pseudotime bins.', 'Perform scVI differential expression between early-pseudotime (activation-biased) and late-pseudotime (exhaustion-biased) bins while conditioning on donor; highlight significantly up-regulated exhaustion-related genes and visualize top markers with dotplots.', 'Summarize findings in a figure panel: UMAP with clusters and scores, exhaustion vs. day violin plots, entropy vs. day scatter, and DE dotplot.']
+
+Code for first step in analysis plan:
+import scanpy as sc
+import scvi
+import numpy as np
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes and minimal gene filtering
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found in the dataset."
+
+# Remove genes expressed in fewer than 20 lymphocyte cells to cut memory cost
+sc.pp.filter_genes(lymphocytes, min_cells=20)
+
+# Preserve raw counts for downstream DE if not already saved
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()
+
+# Ensure donor is treated as categorical string
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 2. Compact scVI setup and training (CPU-friendly)
+scvi.settings.seed = 0
+scvi.model.SCVI.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=15,          # smaller latent space
+    n_layers=1,           # shallower network for speed/memory
+    n_hidden=128          # fewer hidden units
+)
+model.train(
+    max_epochs=30,
+    early_stopping=True,
+    early_stopping_patience=8,
+    check_val_every_n_epoch=1,
+    use_gpu=False,        # explicitly stay on CPU to avoid GPU memory issues
+    verbose=False
+)
+
+# ------------------------------------------------------------------
+# 3. Store latent representation and provenance
+lymphocytes.obsm["X_scVI_15d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "n_latent": 15,
+    "n_layers": 1,
+    "n_hidden": 128,
+    "max_epochs": 30,
+    "seed": 0,
+    "batch_key": "donor",
+    "early_stopping": True
+}
+print(f"Finished scVI training: latent shape {lymphocytes.obsm['X_scVI_15d'].shape}")
+
+Feedback:
+Feedback on analysis plan
+• Novelty: Focus on lymphocyte activation‐to‐exhaustion shift is not covered in the paper—good.  
+• Statistical tests: Spearman OK; Cochran–Armitage is not available in allowed packages. Replace with Jonckheere–Terpstra trend test (scipy.stats.jonckheere_terpstra) or stratified χ² for trend coded manually.  
+• Shannon entropy: define precisely (e.g. −Σpi log₂ pi on library-size-normalized counts); clarify whether to use log1p CPM or scVI denoised expression.  
+• Pseudotime: Scanpy’s DPT works on the kNN graph; make sure root cell(s) are chosen reproducibly (e.g. earliest day & highest activation score).  
+• Differential expression: scvi.model.SCVI.differential_expression must be passed indices or adata.obs column; specify how donor will be conditioned (e.g. batch_correction=True uses built-in covariate).  
+• Multiple-testing: add FDR control and effect-size threshold for DE and gene-set scores.  
+• Gene-set scoring: handle missing genes (lower-/upper-case aliases).  
+• Figure panel: ensure each axis is labeled with units (day post-LH, entropy bits, score z-score, etc.).  
+• Memory: entropy on raw dense matrices is expensive; use X if already log1p sparse or sample 5 000 genes.  
+• Reproducibility: set seeds for Leiden/UMAP.  
+• Keep all analyses on lymphocyte subset to avoid confounding.
+
+Feedback on code (first step)
+1. Overlap / redundancy  
+   – Two independent scVI trainings are present: the “first-step” block (15-d latent, 1 layer) and the later 20-d/2-layer block that reloads the .h5ad. Remove the second; it violates guideline 11 (adata already in memory) and breaks plan consistency.
+
+2. Deviation from plan  
+   – Analysis plan specifies 15-d latent, 1 hidden layer, CPU. Second block overrides these. Keep original hyper-parameters and add use_gpu=False explicitly.
+
+3. Gene filtering  
+   – filter_genes step is present in first block but was dropped in later block. Retain it. Consider sc.pp.filter_genes(…, min_cells=20, inplace=False) and assign to preserve gene order.
+
+4. Raw layer  
+   – Setting lymphocytes.raw = lymphocytes.copy() duplicates AnnData (memory). Prefer lymphocytes.raw = lymphocytes to store view without doubling memory.
+
+5. Batch key  
+   – lymphocytes.obs['donor'] already categorical? Use .astype('category') to save memory and speed.
+
+6. scVI setup  
+   – Pass categorical covariate types explicitly: setup_anndata(…, batch_key='donor', categorical_covariate_keys=None).
+
+7. Training  
+   – With small latent & 1 layer, 30 epochs may still overfit; monitor ELBO and save model state with best validation loss (model.train(check_val_every_n_epoch=1, plan_kwargs=dict(…))). At minimum, print training/validation ELBO every few epochs.
+
+8. Reproducibility & provenance  
+   – Store scvi.settings.version and scanpy.__version__ in lymphocytes.uns['scvi_latent_info'].
+
+9. Logging  
+   – Replace assert with informative message via logging/warnings.
+
+10. Code style  
+    – Follow PEP-8 (blank line after imports, 79-char lines).  
+    – Protect execution in a main guard if this will be modularized.
+
+11. Memory / compute safeguards  
+    – Explicitly delete model after extracting latent to free GPU/CPU RAM.  
+    – Avoid numpy import unless used.
+
+12. Security / paths  
+    – Hard-coded path /scratch/... appears in second block; remove.
+
+Once these fixes are applied, the first step will align with the stated analysis plan and coding guidelines.
+
+Guidelines for constructing the analyses:
+    1. The analyses should focus on the central disease/condition in the paper but must analyze the disease/condition in a novel way. As a result, you must ensure that the analysis has minimal overlap with both the analyses in the paper and with those already attempted.
+    2. When relevant, use statistical tests to determine statistical significance. Ensure that you are printing the results of these
+    3. When relevant, create figures of your results. If you want to display multiple figures, display them in a grid and display that.
+    4. For analyses that depend on celltype, look at each celltype separately. Focus on the celltypes that you think will be most relevant.
+    5. For suggesting novel analyses not present in the paper, focus on using new computational methods, looking at new celltypes/genes/features, and finding new ways to visualize the dataset.
+    6. Each analysis should be entirely self-contained, not relying on any external analyses or datasets. It should be able to be run without changing anything.
+    7. You can only use the following Python packages: scanpy, scvi, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy. DO NOT USE ANY OTHER PACKAGES.
+    8. Make sure to only use data found in the anndata object. Take advantage of as much of the metadata information as possible.
+    9. The path to the anndata object is /scratch/users/salber/endo_data.h5ad
+    10. The analysis should be focused on one core goal/hypothesis. It should not branch out from this significantly. 
+    11. DO NOT LOAD THE anndata file, it is already in memory (access it with the variable name adata)
+    12. Display all figures. Never same them to a file.
+    13. The analyses should be standard and should be analyses you think the paper missed.
+
+Here is a summary of core single-cell analyses commonly done with the python libraries available to you:
+## Dimensionality Reduction
+Purpose: Embed high-dimensional gene expression into lower dimensions for visualization and analysis.
+
+Non-linear Embeddings: Further reduce to 2D/3D for visualization using t-SNE or UMAP. Scanpy provides sc.tl.umap(adata) (via UMAP) and sc.tl.tsne(adata). These use the neighborhood graph (see below) to embed cells so that similar cells cluster together. For example, after sc.pp.neighbors, call sc.tl.umap(adata). Alternative embeddings include diffusion map (sc.tl.diffmap) or force-directed graph (sc.tl.draw_graph), though the latter are less commonly used now.
+
+Latent Embedding (scVI): As an advanced dimensionality reduction, the SCVI model produces a probabilistic latent space. After training SCVI, extract latent = model.get_latent_representation() and store it (e.g. in adata.obsm['X_scVI']). These latent coordinates can be used instead of PCA for UMAP/t-SNE or clustering, often yielding better batch correction or representation of complex structure
+
+## Neighborhood Graph Construction
+Purpose: Build a k-nearest-neighbor graph of cells as input for clustering and visualization.
+sc.pp.neighbors: Compute the kNN graph on the chosen low-dimensional representation (PCA or latent) with sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30). This populates adata.obsp['connectivities'] and adata.obsp['distances']. The graph defines edges between similar cells. Parameters include n_neighbors, distance metric, and which embedding to use (via use_rep or default PCA).
+Graph-based Refinements: Additional options allow customizing neighbor computation (e.g. method='umap' vs 'rapids-ann', etc.), but defaults suffice for most use cases. The neighbors graph underlies downstream UMAP/t-SNE and clustering. For example, sc.pp.neighbors(adata) is typically run before sc.tl.umap(adata)
+
+
+## Clustering
+Purpose: Identify groups of similar cells (e.g. cell types or states) in an unsupervised way.
+Leiden Algorithm: A common approach is to use community detection on the kNN graph. Scanpy’s sc.tl.leiden(adata, resolution=1.0, key_added='leiden') partitions cells into clusters (stored in adata.obs['leiden']). Leiden is an improved version of Louvain and requires the neighbors graph to be precomputed. The resolution parameter controls cluster granularity (higher → more clusters).
+Louvain Algorithm: Alternatively, use sc.tl.louvain(adata), which applies the Louvain method. It also depends on sc.pp.neighbors. Both algorithms label clusters in adata.obs.
+Cluster Options: Both Leiden and Louvain can be run with different seeds or restrictions (e.g. restrict_to a subset of obs categories). One can also iterate clustering at multiple resolutions to explore structure.
+Hierarchical Dendrogram (Optional): After clustering, Scanpy can build a dendrogram of cluster relationships with sc.tl.dendrogram(adata, groupby='leiden'), which stores a linkage in adata.uns and can be plotted with sc.pl.dendrogram. This helps interpret cluster similarities.
+Result: The output is a categorical label per cell (e.g. adata.obs['leiden']) representing inferred clusters/cell groups. These are often interpreted as putative cell types or subpopulations.
+
+
+## Trajectory and Pseudotime Analysis
+Purpose: Model continuous developmental or differentiation processes.
+Diffusion Pseudotime (DPT): Scanpy includes sc.tl.dpt(adata, n_dcs=10) to compute a diffusion-based pseudotemporal ordering. One must pick a “root” cell or cluster (often the presumed progenitor); DPT then assigns each cell a pseudotime (adata.obs['dpt_pseudotime']) based on diffusion distance from the root. This creates an ordering reflecting smooth transitions.
+Partition-based Graph Abstraction (PAGA): PAGA computes a coarse-grained connectivity graph between clusters. Using sc.tl.paga(adata, groups='leiden'), one obtains adata.uns['paga'], where edges between clusters have confidence weights. Plotting sc.pl.paga(adata, threshold=0.03) shows a simplified graph of cluster relations. PAGA can also be used to initialize UMAP (sc.tl.umap(adata, init_pos='paga')) for embeddings faithful to overall topology
+
+
+## Differential Expression and Marker Gene Detection
+Purpose: Identify genes that are characteristic of clusters or conditions.
+Rank Genes per Group: Use sc.tl.rank_genes_groups to perform marker analysis. Given adata.obs[groupby] (e.g. 'leiden'), this compares each group to others (or pairwise) and ranks genes by statistical tests. Methods include t-test, Welch’s t-test, Wilcoxon, or logistic regression (method='logreg'). For example, sc.tl.rank_genes_groups(adata, 'leiden', method='wilcoxon') fills adata.uns['rank_genes_groups'] with names, scores, p-values, and log-fold changes for top markers of each cluster. One can customize the test (e.g. method='logreg' for sparse markers). Results can be visualized with sc.pl.rank_genes_groups_heatmap or sc.pl.rank_genes_groups_dotplot.
+Logistic Regression (Alternative): Setting method='logreg' performs logistic regression classification for each gene (as in Ntranos et al., 2019). It often yields robust marker sets.
+SCVI Differential Expression: The trained SCVI model provides model.differential_expression, which can test for differentially expressed genes between groups of cells in a probabilistic framework. For example, model.differential_expression(groupby="cell_type", group1="A", group2="B") returns a dataframe of DE statistics. SCVI supports 1-vs-1 or 1-vs-all testing. This method accounts for model uncertainty and can be more powerful in large datasets.
+
+
+## Gene Signature Scoring
+Purpose: Quantify the expression of gene sets (e.g. cell-cycle genes, pathways) per cell.
+General Gene Set Scoring: sc.tl.score_genes(adata, gene_list, score_name="score") computes the average expression of a set of genes (minus average of random reference genes) for each cell. The result is added to adata.obs['score_name']. This can reflect pathway activity or other signatures.
+Cell-Cycle Scoring: A specialized function sc.tl.score_genes_cell_cycle(adata, s_genes, g2m_genes) takes lists of S-phase and G2M-phase marker genes and assigns each cell an S_score, G2M_score, and a categorical phase (G1, S, or G2M). This is useful to regress out or analyze cell-cycle effects.
+Options: Gene lists (e.g. provided with Scanpy, or user-defined) can be passed. The scoring considers control gene sets (by default) to normalize the scores. Cells are labeled by dominant phase if desired.
+
+## Visualization
+Purpose: Plot results (embeddings, marker expression, QC) to interpret data.
+Embedding Plots: sc.pl.umap(adata, color=[...]) or sc.pl.tsne(...) plot the 2D embedding, coloring points by cluster, sample, or gene expression. For example, sc.pl.umap(adata, color=['leiden', 'n_genes_by_counts']). sc.pl.draw_graph (force layout) and sc.pl.paga (PAGA graph) are also available. Many sc.pl functions return Matplotlib axes if show=False.
+QC and Metadata Plots: sc.pl.violin(adata, keys, ...) creates violin plots per group (e.g. distribution of counts or gene expression across clusters). In the QC tutorial, Scanpy shows violin plots of total counts and mitochondrial percentage. sc.pl.scatter(adata, x, y, color=...) makes 2D scatter (e.g. total_counts vs n_genes).
+Marker Gene Plots: Once clusters are defined, visualizing marker genes is key. Common plots include dotplots, heatmaps, and violin plots of cluster markers. For example, sc.pl.dotplot(adata, var_names, groupby='leiden') shows mean expression (color) and percent expressed (dot size) of selected genes per cluster. Similarly, sc.pl.matrixplot is a heatmap variant. The core plotting tutorial demonstrates dotplots and violin plots for cluster markers.
+Gene Expression Distributions: sc.pl.violin(adata, gene_list, groupby='leiden') and sc.pl.stacked_violin show the distribution of one or more genes across clusters.
+Clustered Heatmaps: sc.pl.heatmap can display expression of marker genes across clusters. sc.pl.clustermap (wrapper around Seaborn) can cluster cells/genes in a heatmap, often using raw or log counts.
+Pathway/Gene Set Plots: Custom heatmaps or barplots using Matplotlib/Seaborn can be made from gene scores or DE results (using Pandas/NumPy to extract data). Scanpy’s plots cover most scRNA needs, but any Matplotlib/Seaborn function can be used on data from adata.obs, adata.var, or adata.layers. For example, one might use sns.clustermap on a subset of adata.X.
+
+
+
+You are given the following summary of the anndata object:
+Below is a description of the columns in adata.obs: 
+Column cell_name contains the values ['14_AAACCCAAGTAATACG' '14_AAACCCAGTCCTTAAG' '14_AAACGAAAGGCGATAC'
+ '14_AAACGCTAGACTGTTC' '14_AAACGCTAGAGTGTTA' '14_AAACGCTAGTCTAGCT'
+ '14_AAACGCTGTTGTGGCC' '14_AAACGCTTCTTGCAGA' '14_AAAGAACAGCTCCGAC'
+ '14_AAAGAACAGGTACTGG'] 
+Column cell_type contains the values ['Ciliated' 'Endothelia' 'Lymphocytes' 'Macrophages' 'Smooth muscle cells'
+ 'Stromal fibroblasts' 'Unciliated epithelia' 'Unciliated epithelia 1'
+ 'Unciliated epithelia 2'] 
+Column dataset contains the values ['10x' 'C1'] 
+Column day contains the values [ 4  7  9 10 11 15 16 17 19 20] 
+Column donor contains the values [ 4  5  6  7  8 11 12 13 14 15] 
+
+
+Here is the code from the last 3 steps. Make sure the modified code builds on the past analyses and doesn't repeat any of them:
+
+import numpy as np
+import scanpy as sc
+import scvi
+
+# ------------------------------------------------------------------
+# Set global randomness for reproducibility
+np.random.seed(0)
+scvi.settings.seed = 0
+sc.settings.set_figure_params(dpi=80, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes and basic sanity checks
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found in the dataset."
+
+# Preserve raw counts for downstream differential expression
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()
+
+# Ensure donor is string-typed (required for scVI categorical handling)
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 2. scVI setup and model training (donor-batch correction)
+scvi.model.SCVI.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=20,
+    n_layers=2,
+)
+# Reduced epochs and patience to avoid long runtimes
+model.train(
+    max_epochs=50,
+    early_stopping=True,
+    early_stopping_patience=10,
+    check_val_every_n_epoch=1,
+    verbose=False,
+)
+
+# ------------------------------------------------------------------
+# 3. Store the latent representation and model provenance
+lymphocytes.obsm["X_scVI_20d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "n_latent": 20,
+    "n_layers": 2,
+    "max_epochs": 50,
+    "seed": 0,
+    "batch_key": "donor",
+    "early_stopping": True,
+}
+
+print(f"Stored scVI latent with shape {lymphocytes.obsm['X_scVI_20d'].shape}")
+print(f"Final training ELBO: {model.history['elbo_train'].iloc[-1]:.2f}")
+
+
+# Next Cell
+import scanpy as sc
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+import warnings
+
+# Set up visualization defaults for better plots
+sc.settings.verbosity = 3  # verbosity: errors (0), warnings (1), info (2), hints (3)
+sc.settings.figsize = (8, 8)
+sc.settings.dpi = 100
+sc.settings.facecolor = 'white'
+warnings.filterwarnings('ignore')
+
+# Set Matplotlib and Seaborn styles for better visualization
+plt.rcParams['figure.figsize'] = (10, 8)
+plt.rcParams['savefig.dpi'] = 150
+sns.set_style('whitegrid')
+sns.set_context('notebook', font_scale=1.2)
+
+# Load data
+print("Loading data...")
+adata = sc.read_h5ad("/scratch/users/salber/endo_data.h5ad")
+print(f"Data loaded: {adata.shape[0]} cells and {adata.shape[1]} genes")
+
+
+
+================================================================================
+2025-05-18 23:06:15,388 - INFO
+================================================================================
+RESPONSE/OUTPUT: next_step
+
+Next step: Subset lymphocytes, remove genes expressed in <20 cells, keep raw counts by reference (not copy), cast donor as categorical, then train a compact CPU-only scVI model (15-dim latent, 1 hidden layer, 128 units) batch-corrected on donor; save embedding to obsm['X_scVI_15d'] together with versioned metadata.
+
+Code:
+```python
+import logging
+import scanpy as sc
+import scvi
+
+# ---------------------------------------------------------------
+# Configure logging for informative, reproducible output
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+scvi.settings.seed = 0
+sc.settings.set_figure_params(dpi=100, facecolor="white")
+
+# ---------------------------------------------------------------
+# 1. Subset to lymphocytes
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+if mask.sum() == 0:
+    raise ValueError("No lymphocytes found in adata.obs['cell_type'].")
+lymphocytes = adata[mask].copy()
+logging.info(f"Subsetted lymphocytes: {lymphocytes.n_obs} cells")
+
+# ---------------------------------------------------------------
+# 2. Gene filtering to reduce memory footprint
+sc.pp.filter_genes(lymphocytes, min_cells=20)
+logging.info(f"After gene filter: {lymphocytes.n_vars} genes retained (\u226520 cells)")
+
+# ---------------------------------------------------------------
+# 3. Preserve raw counts (reference, not deep copy)
+lymphocytes.raw = lymphocytes  # lightweight view for DE
+
+# ---------------------------------------------------------------
+# 4. Ensure donor is categorical string for scVI batching
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str).astype("category")
+
+# ---------------------------------------------------------------
+# 5. Setup and train compact scVI model (CPU)
+scvi.model.SCVI.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=15,
+    n_layers=1,
+    n_hidden=128,
+)
+model.train(
+    max_epochs=30,
+    early_stopping=True,
+    early_stopping_patience=8,
+    check_val_every_n_epoch=1,
+    use_gpu=False,
+    verbose=False,
+)
+
+# ---------------------------------------------------------------
+# 6. Store latent representation and provenance
+lymphocytes.obsm["X_scVI_15d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "scanpy_version": sc.__version__,
+    "scvi_version": scvi.__version__,
+    "n_latent": 15,
+    "n_layers": 1,
+    "n_hidden": 128,
+    "max_epochs": 30,
+    "batch_key": "donor",
+    "early_stopping": True,
+    "seed": 0,
+}
+logging.info(f"scVI latent stored: {lymphocytes.obsm['X_scVI_15d'].shape}")
+
+# ---------------------------------------------------------------
+# 7. Free model to reclaim memory
+del model
+```
+
+
+================================================================================
+2025-05-18 23:10:29,729 - INFO
+================================================================================
+PROMPT: Incorporate Critiques (user)
+
+You will be given a hypothesis, analysis plan, and the python code for the first step in that analysis plan.
+You will also be given feedback for these components. Your role is to incorporate that feedback and update these components.
+
+Analysis Hypothesis:
+Endometrial lymphocyte populations comprise transcriptionally distinct sub-states whose relative abundance and cytotoxic activation are modulated across the menstrual cycle; these changes can be captured after donor-batch correction in a simple PCA space and quantified downstream.
+
+Analysis Plan:
+["Subset adata to lymphocytes, perform library-size normalisation, log1p transform, select 2,000 highly variable genes, apply Combat batch correction on donor, and compute a 30-component PCA embedding; store the result in obsm['X_pca_30d'] and keep raw counts for later DE.", 'Construct a k-nearest neighbour graph on the corrected PCA space (n_neighbors = 15), run Leiden clustering (resolution = 1.0, random_state = 0), compute a UMAP, and annotate clusters with CellTypist using the immune-focused ‘Immune_All_Low.pkl’ model while retaining per-cell prediction probabilities.', 'Aggregate cluster (subtype) proportions per donor within three phase bins (proliferative = 4–9, early-secretory = 10–14, mid-secretory = 15–19) and test for monotonic trends with Cochran–Armitage; visualise with stacked barplots and donor-overlayed dotplots.', 'Compute per-cell cytotoxic gene-set scores (GZMB, PRF1, NKG7, GNLY, KLRD1) and compare distributions across phase bins within each annotated subtype using Kruskal–Wallis followed by Dunn tests (BH correction); display subtype-stratified violin plots.', 'Within annotated NK-like clusters, perform SCVI differential expression (model trained on the NK subset only) between proliferative (days 4–9) and mid-secretory (days 15–19) phases while conditioning on donor, apply FDR < 0.05, and visualise top up-/down-regulated genes with dotplots emphasising cytotoxic and implantation-related genes.']
+
+Code for first step in analysis plan:
+import numpy as np
+import scanpy as sc
+import pandas as pd
+
+# --------------------------------------------------------------
+# 0. Reproducibility and plotting defaults
+np.random.seed(0)
+sc.settings.verbosity = 2  # show progress
+sc.settings.set_figure_params(dpi=80, facecolor="white")
+
+# --------------------------------------------------------------
+# 1. Subset to lymphocytes and keep raw counts for DE
+mask = adata.obs['cell_type'].str.strip() == 'Lymphocytes'
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes detected."
+
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()  # preserve raw counts
+
+# Ensure donor is categorical string (required by Combat later)
+lymphocytes.obs['donor'] = lymphocytes.obs['donor'].astype(str)
+
+# --------------------------------------------------------------
+# 2. Normalisation & log-transform
+sc.pp.normalize_total(lymphocytes, target_sum=1e4)
+sc.pp.log1p(lymphocytes)
+
+# --------------------------------------------------------------
+# 3. Highly variable genes (Seurat v3 flavour)
+sc.pp.highly_variable_genes(
+    lymphocytes,
+    flavor='seurat_v3',
+    n_top_genes=2000,
+    batch_key='donor',
+    subset=False,
+)
+
+hvg_mask = lymphocytes.var['highly_variable']
+print(f"Selected {hvg_mask.sum()} HVGs.")
+
+# --------------------------------------------------------------
+# 4. Batch correction with Combat (donor as batch)
+#    We apply Combat on HVGs only for efficiency, then replace X
+hvg_data = lymphocytes[:, hvg_mask].copy()
+sc.pp.combat(hvg_data, key='donor')
+
+# The Combat-corrected HVG matrix replaces the original HVG slice
+lymphocytes.layers['combat_hvg'] = hvg_data.X.copy()  # keep a copy
+lymphocytes.X[:, hvg_mask] = hvg_data.X  # in-place replacement
+
+# --------------------------------------------------------------
+# 5. Scaling & PCA
+sc.pp.scale(lymphocytes, max_value=10)
+sc.tl.pca(lymphocytes, n_comps=30, svd_solver='arpack')
+print("PCA completed; variance explained (first 5 comps):", lymphocytes.uns['pca']['variance_ratio'][:5].round(3))
+
+# Store the 30-D PCA embedding explicitly (Combat-corrected)
+lymphocytes.obsm['X_pca_30d'] = lymphocytes.obsm['X_pca'][:, :30]
+
+# --------------------------------------------------------------
+# 6. Quick sanity check: plot elbow curve for explained variance
+import matplotlib.pyplot as plt
+plt.figure(figsize=(5,3))
+plt.plot(np.arange(1, 31), lymphocytes.uns['pca']['variance_ratio'][:30]*100, 'o-')
+plt.xlabel('PC number')
+plt.ylabel('% variance explained')
+plt.title('Lymphocyte PCA elbow (Combat-corrected)')
+plt.tight_layout()
+plt.show()
+
+# Persist the processed AnnData object for downstream steps
+# (If running in notebook, we can keep it in memory.)
+print(f"Processed lymphocyte object: {lymphocytes.n_obs} cells × {lymphocytes.n_vars} genes")
+
+Feedback:
+FEEDBACK ON ANALYSIS PLAN
+• Hypothesis is clear, focused on lymphocyte sub-states across the cycle; downstream tests (Cochran–Armitage, Kruskal–Wallis/Dunn, SCVI-DE) are appropriate and novel relative to paper.  
+• Step order is logical, but step 1 (Combat-PCA) and subsequent steps (Leiden, UMAP etc.) rely on the corrected PCA that is later superseded by scVI latent space in the “last 3 steps” code. Decide on ONE backbone (Combat-PCA OR scVI latent) to avoid redundancy and interpretation confusion.  
+• Using Combat alone for batch correction is dated and less powerful than scVI; if you keep Combat, justify why scVI is only used for DE (step 5) but not for embedding/clustering. Conversely, if scVI is the main integrator, adjust steps 2-4 to use scVI latent (neighbors on X_scVI_20d).  
+• Clarify whether “library-size normalisation + log1p” is applied before Combat (as in code) or whether Combat should operate on log(CPM+1) explicitly; mention this in plan.  
+• Define how phase bins map to “day” metadata (inclusive boundaries, missing days 12, 13, 18?).  
+• Cochran–Armitage assumes ordered phases with ≥2 donors per bin; ensure sample size suffices or fall back to CMH/Fisher.  
+• Dunn test requires scikit-posthocs; unavailable → use scipy.stats.posthoc_dunn or implement manually, or state alternative (pairwise Wilcoxon + BH).  
+• Step 5: SCVI differential_expression automatically accounts for donor if donor is the batch_key; no extra conditioning needed. Specify n_samples and effect size cut-offs.  
+• Consider adding a QC checkpoint (mito%, nUMI) before analysis to avoid donor-specific low-quality bias—especially critical before batch correction.
+
+FEEDBACK ON FIRST-STEP CODE (Combat-PCA CELL)
++ Correctly subsets lymphocytes, preserves raw counts, normalises, selects 2 000 HVGs, applies Combat on donor, derives 30-PC embedding, and stores in obsm['X_pca_30d'] as required.  
++ Reproducibility and minimal plotting defaults set.  
+
+Issues / Improvements
+1. Raw counts are stored BEFORE normalisation (good) but you copy the entire adata (dense) into .raw, doubling memory. Use lymphocytes.raw = lymphocytes.raw = lymphocytes[:, :].copy() only if adata.X is sparse; otherwise consider layers to save RAM.  
+2. sc.pp.combat modifies hvg_data in place but retains float64; cast to float32 afterwards to reduce memory: hvg_data.X = hvg_data.X.astype('float32').  
+3. Mixing corrected HVG values with uncorrected non-HVG values (lymphocytes.X[:, hvg_mask] = …) produces a hybrid matrix on which scaling is later performed. This violates Combat’s assumption that batch effects act genome-wide and complicates downstream DE. Either:  
+   • run Combat on ALL genes, or  
+   • restrict the entire analysis (scaling, PCA) to HVGs only.  
+4. After in-place replacement, layers['combat_hvg'] duplicates data; if memory tight, keep only layers or the hybrid X, not both.  
+5. Combat requires log-transformed data; your pipeline satisfies this, but add a comment (currently implicit).  
+6. sc.pp.scale over ALL genes can overfit low-variance non-HVGs; recommend scale only HVGs chosen for PCA. Use sc.pp.scale(lymphocytes, max_value=10, zero_center=True, subset=hvg_mask).  
+7. Set lymphocytes.var['highly_variable'] in the output when subset=True to avoid confusion later.  
+8. Random seed for PCA not set (svd_solver=‘arpack’ uses deterministic but better to set sc.settings.set_figure_params in advance).  
+9. The elbow plot uses % variance but axis title does not indicate “first 30 PCs”; minor clarity issue.  
+10. Saving processed object: add lymphocytes.write_h5ad if running as script; current print is fine for notebook.  
+
+Consistency with Later Cells
+• The provided “last 3 steps” already train an scVI model on the same lymphocyte subset, overwriting or ignoring Combat-PCA. Running both pipelines on the same session will duplicate objects, consume RAM, and blur which embedding is used downstream. Choose one integration strategy and propagate it through the plan and code.
+
+Guidelines for constructing the analyses:
+    1. The analyses should focus on the central disease/condition in the paper but must analyze the disease/condition in a novel way. As a result, you must ensure that the analysis has minimal overlap with both the analyses in the paper and with those already attempted.
+    2. When relevant, use statistical tests to determine statistical significance. Ensure that you are printing the results of these
+    3. When relevant, create figures of your results. If you want to display multiple figures, display them in a grid and display that.
+    4. For analyses that depend on celltype, look at each celltype separately. Focus on the celltypes that you think will be most relevant.
+    5. For suggesting novel analyses not present in the paper, focus on using new computational methods, looking at new celltypes/genes/features, and finding new ways to visualize the dataset.
+    6. Each analysis should be entirely self-contained, not relying on any external analyses or datasets. It should be able to be run without changing anything.
+    7. You can only use the following Python packages: scanpy, scvi, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy. DO NOT USE ANY OTHER PACKAGES.
+    8. Make sure to only use data found in the anndata object. Take advantage of as much of the metadata information as possible.
+    9. The path to the anndata object is /scratch/users/salber/endo_data.h5ad
+    10. The analysis should be focused on one core goal/hypothesis. It should not branch out from this significantly. 
+    11. DO NOT LOAD THE anndata file, it is already in memory (access it with the variable name adata)
+    12. Display all figures. Never same them to a file.
+    13. The analyses should be standard and should be analyses you think the paper missed.
+
+Here is a summary of core single-cell analyses commonly done with the python libraries available to you:
+## Dimensionality Reduction
+Purpose: Embed high-dimensional gene expression into lower dimensions for visualization and analysis.
+
+Non-linear Embeddings: Further reduce to 2D/3D for visualization using t-SNE or UMAP. Scanpy provides sc.tl.umap(adata) (via UMAP) and sc.tl.tsne(adata). These use the neighborhood graph (see below) to embed cells so that similar cells cluster together. For example, after sc.pp.neighbors, call sc.tl.umap(adata). Alternative embeddings include diffusion map (sc.tl.diffmap) or force-directed graph (sc.tl.draw_graph), though the latter are less commonly used now.
+
+Latent Embedding (scVI): As an advanced dimensionality reduction, the SCVI model produces a probabilistic latent space. After training SCVI, extract latent = model.get_latent_representation() and store it (e.g. in adata.obsm['X_scVI']). These latent coordinates can be used instead of PCA for UMAP/t-SNE or clustering, often yielding better batch correction or representation of complex structure
+
+## Neighborhood Graph Construction
+Purpose: Build a k-nearest-neighbor graph of cells as input for clustering and visualization.
+sc.pp.neighbors: Compute the kNN graph on the chosen low-dimensional representation (PCA or latent) with sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30). This populates adata.obsp['connectivities'] and adata.obsp['distances']. The graph defines edges between similar cells. Parameters include n_neighbors, distance metric, and which embedding to use (via use_rep or default PCA).
+Graph-based Refinements: Additional options allow customizing neighbor computation (e.g. method='umap' vs 'rapids-ann', etc.), but defaults suffice for most use cases. The neighbors graph underlies downstream UMAP/t-SNE and clustering. For example, sc.pp.neighbors(adata) is typically run before sc.tl.umap(adata)
+
+
+## Clustering
+Purpose: Identify groups of similar cells (e.g. cell types or states) in an unsupervised way.
+Leiden Algorithm: A common approach is to use community detection on the kNN graph. Scanpy’s sc.tl.leiden(adata, resolution=1.0, key_added='leiden') partitions cells into clusters (stored in adata.obs['leiden']). Leiden is an improved version of Louvain and requires the neighbors graph to be precomputed. The resolution parameter controls cluster granularity (higher → more clusters).
+Louvain Algorithm: Alternatively, use sc.tl.louvain(adata), which applies the Louvain method. It also depends on sc.pp.neighbors. Both algorithms label clusters in adata.obs.
+Cluster Options: Both Leiden and Louvain can be run with different seeds or restrictions (e.g. restrict_to a subset of obs categories). One can also iterate clustering at multiple resolutions to explore structure.
+Hierarchical Dendrogram (Optional): After clustering, Scanpy can build a dendrogram of cluster relationships with sc.tl.dendrogram(adata, groupby='leiden'), which stores a linkage in adata.uns and can be plotted with sc.pl.dendrogram. This helps interpret cluster similarities.
+Result: The output is a categorical label per cell (e.g. adata.obs['leiden']) representing inferred clusters/cell groups. These are often interpreted as putative cell types or subpopulations.
+
+
+## Trajectory and Pseudotime Analysis
+Purpose: Model continuous developmental or differentiation processes.
+Diffusion Pseudotime (DPT): Scanpy includes sc.tl.dpt(adata, n_dcs=10) to compute a diffusion-based pseudotemporal ordering. One must pick a “root” cell or cluster (often the presumed progenitor); DPT then assigns each cell a pseudotime (adata.obs['dpt_pseudotime']) based on diffusion distance from the root. This creates an ordering reflecting smooth transitions.
+Partition-based Graph Abstraction (PAGA): PAGA computes a coarse-grained connectivity graph between clusters. Using sc.tl.paga(adata, groups='leiden'), one obtains adata.uns['paga'], where edges between clusters have confidence weights. Plotting sc.pl.paga(adata, threshold=0.03) shows a simplified graph of cluster relations. PAGA can also be used to initialize UMAP (sc.tl.umap(adata, init_pos='paga')) for embeddings faithful to overall topology
+
+
+## Differential Expression and Marker Gene Detection
+Purpose: Identify genes that are characteristic of clusters or conditions.
+Rank Genes per Group: Use sc.tl.rank_genes_groups to perform marker analysis. Given adata.obs[groupby] (e.g. 'leiden'), this compares each group to others (or pairwise) and ranks genes by statistical tests. Methods include t-test, Welch’s t-test, Wilcoxon, or logistic regression (method='logreg'). For example, sc.tl.rank_genes_groups(adata, 'leiden', method='wilcoxon') fills adata.uns['rank_genes_groups'] with names, scores, p-values, and log-fold changes for top markers of each cluster. One can customize the test (e.g. method='logreg' for sparse markers). Results can be visualized with sc.pl.rank_genes_groups_heatmap or sc.pl.rank_genes_groups_dotplot.
+Logistic Regression (Alternative): Setting method='logreg' performs logistic regression classification for each gene (as in Ntranos et al., 2019). It often yields robust marker sets.
+SCVI Differential Expression: The trained SCVI model provides model.differential_expression, which can test for differentially expressed genes between groups of cells in a probabilistic framework. For example, model.differential_expression(groupby="cell_type", group1="A", group2="B") returns a dataframe of DE statistics. SCVI supports 1-vs-1 or 1-vs-all testing. This method accounts for model uncertainty and can be more powerful in large datasets.
+
+
+## Gene Signature Scoring
+Purpose: Quantify the expression of gene sets (e.g. cell-cycle genes, pathways) per cell.
+General Gene Set Scoring: sc.tl.score_genes(adata, gene_list, score_name="score") computes the average expression of a set of genes (minus average of random reference genes) for each cell. The result is added to adata.obs['score_name']. This can reflect pathway activity or other signatures.
+Cell-Cycle Scoring: A specialized function sc.tl.score_genes_cell_cycle(adata, s_genes, g2m_genes) takes lists of S-phase and G2M-phase marker genes and assigns each cell an S_score, G2M_score, and a categorical phase (G1, S, or G2M). This is useful to regress out or analyze cell-cycle effects.
+Options: Gene lists (e.g. provided with Scanpy, or user-defined) can be passed. The scoring considers control gene sets (by default) to normalize the scores. Cells are labeled by dominant phase if desired.
+
+## Visualization
+Purpose: Plot results (embeddings, marker expression, QC) to interpret data.
+Embedding Plots: sc.pl.umap(adata, color=[...]) or sc.pl.tsne(...) plot the 2D embedding, coloring points by cluster, sample, or gene expression. For example, sc.pl.umap(adata, color=['leiden', 'n_genes_by_counts']). sc.pl.draw_graph (force layout) and sc.pl.paga (PAGA graph) are also available. Many sc.pl functions return Matplotlib axes if show=False.
+QC and Metadata Plots: sc.pl.violin(adata, keys, ...) creates violin plots per group (e.g. distribution of counts or gene expression across clusters). In the QC tutorial, Scanpy shows violin plots of total counts and mitochondrial percentage. sc.pl.scatter(adata, x, y, color=...) makes 2D scatter (e.g. total_counts vs n_genes).
+Marker Gene Plots: Once clusters are defined, visualizing marker genes is key. Common plots include dotplots, heatmaps, and violin plots of cluster markers. For example, sc.pl.dotplot(adata, var_names, groupby='leiden') shows mean expression (color) and percent expressed (dot size) of selected genes per cluster. Similarly, sc.pl.matrixplot is a heatmap variant. The core plotting tutorial demonstrates dotplots and violin plots for cluster markers.
+Gene Expression Distributions: sc.pl.violin(adata, gene_list, groupby='leiden') and sc.pl.stacked_violin show the distribution of one or more genes across clusters.
+Clustered Heatmaps: sc.pl.heatmap can display expression of marker genes across clusters. sc.pl.clustermap (wrapper around Seaborn) can cluster cells/genes in a heatmap, often using raw or log counts.
+Pathway/Gene Set Plots: Custom heatmaps or barplots using Matplotlib/Seaborn can be made from gene scores or DE results (using Pandas/NumPy to extract data). Scanpy’s plots cover most scRNA needs, but any Matplotlib/Seaborn function can be used on data from adata.obs, adata.var, or adata.layers. For example, one might use sns.clustermap on a subset of adata.X.
+
+
+
+You are given the following summary of the anndata object:
+Below is a description of the columns in adata.obs: 
+Column cell_name contains the values ['14_AAACCCAAGTAATACG' '14_AAACCCAGTCCTTAAG' '14_AAACGAAAGGCGATAC'
+ '14_AAACGCTAGACTGTTC' '14_AAACGCTAGAGTGTTA' '14_AAACGCTAGTCTAGCT'
+ '14_AAACGCTGTTGTGGCC' '14_AAACGCTTCTTGCAGA' '14_AAAGAACAGCTCCGAC'
+ '14_AAAGAACAGGTACTGG'] 
+Column cell_type contains the values ['Ciliated' 'Endothelia' 'Lymphocytes' 'Macrophages' 'Smooth muscle cells'
+ 'Stromal fibroblasts' 'Unciliated epithelia' 'Unciliated epithelia 1'
+ 'Unciliated epithelia 2'] 
+Column dataset contains the values ['10x' 'C1'] 
+Column day contains the values [ 4  7  9 10 11 15 16 17 19 20] 
+Column donor contains the values [ 4  5  6  7  8 11 12 13 14 15] 
+
+
+Here is the code from the last 3 steps. Make sure the modified code builds on the past analyses and doesn't repeat any of them:
+
+import numpy as np
+import scanpy as sc
+import scvi
+
+# ------------------------------------------------------------------
+# Set global randomness for reproducibility
+np.random.seed(0)
+scvi.settings.seed = 0
+sc.settings.set_figure_params(dpi=80, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes and basic sanity checks
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found in the dataset."
+
+# Preserve raw counts for downstream differential expression
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()
+
+# Ensure donor is string-typed (required for scVI categorical handling)
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 2. scVI setup and model training (donor-batch correction)
+scvi.model.SCVI.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=20,
+    n_layers=2,
+)
+# Reduced epochs and patience to avoid long runtimes
+model.train(
+    max_epochs=50,
+    early_stopping=True,
+    early_stopping_patience=10,
+    check_val_every_n_epoch=1,
+)
+
+# ------------------------------------------------------------------
+# 3. Store the latent representation and model provenance
+lymphocytes.obsm["X_scVI_20d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "n_latent": 20,
+    "n_layers": 2,
+    "max_epochs": 50,
+    "seed": 0,
+    "batch_key": "donor",
+    "early_stopping": True,
+}
+
+print(f"Stored scVI latent with shape {lymphocytes.obsm['X_scVI_20d'].shape}")
+print(f"Final training ELBO: {model.history['elbo_train'].iloc[-1]:.2f}")
+
+
+# Next Cell
+
+import numpy as np
+import scanpy as sc
+import scvi
+
+# ------------------------------------------------------------------
+# Set global randomness for reproducibility
+np.random.seed(0)
+scvi.settings.seed = 0
+sc.settings.set_figure_params(dpi=80, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes and basic sanity checks
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found in the dataset."
+
+# Preserve raw counts for downstream differential expression
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()
+
+# Ensure donor is string-typed (required for scVI categorical handling)
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 2. scVI setup and model training (donor-batch correction)
+scvi.model.SCVI.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=20,
+    n_layers=2,
+)
+# Reduced epochs and patience to avoid long runtimes
+model.train(
+    max_epochs=50,
+    early_stopping=True,
+    early_stopping_patience=10,
+    check_val_every_n_epoch=1,
+    verbose=False,
+)
+
+# ------------------------------------------------------------------
+# 3. Store the latent representation and model provenance
+lymphocytes.obsm["X_scVI_20d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "n_latent": 20,
+    "n_layers": 2,
+    "max_epochs": 50,
+    "seed": 0,
+    "batch_key": "donor",
+    "early_stopping": True,
+}
+
+print(f"Stored scVI latent with shape {lymphocytes.obsm['X_scVI_20d'].shape}")
+print(f"Final training ELBO: {model.history['elbo_train'].iloc[-1]:.2f}")
+
+
+# Next Cell
+import scanpy as sc
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+import warnings
+
+# Set up visualization defaults for better plots
+sc.settings.verbosity = 3  # verbosity: errors (0), warnings (1), info (2), hints (3)
+sc.settings.figsize = (8, 8)
+sc.settings.dpi = 100
+sc.settings.facecolor = 'white'
+warnings.filterwarnings('ignore')
+
+# Set Matplotlib and Seaborn styles for better visualization
+plt.rcParams['figure.figsize'] = (10, 8)
+plt.rcParams['savefig.dpi'] = 150
+sns.set_style('whitegrid')
+sns.set_context('notebook', font_scale=1.2)
+
+# Load data
+print("Loading data...")
+adata = sc.read_h5ad("/scratch/users/salber/endo_data.h5ad")
+print(f"Data loaded: {adata.shape[0]} cells and {adata.shape[1]} genes")
+
+
+
+================================================================================
+2025-05-18 23:10:29,735 - INFO
+================================================================================
+RESPONSE/OUTPUT: next_step
+
+Next step: Quality-control raw counts (add n_counts, n_genes, pct_mito; filter n_genes < 500, n_genes > 7,500 or pct_mito > 15 %) and subset to lymphocytes; store raw counts, library-size–normalise to 10 000 CPM, log1p-transform, and select 2 000 Seurat-v3 HVGs (batch_key = 'donor').
+
+Code:
+```python
+import scanpy as sc
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# ------------------------------------------------------------------
+# 0. Reproducibility & plotting defaults
+np.random.seed(0)
+sc.settings.verbosity = 2
+sc.settings.set_figure_params(dpi=90, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Compute basic QC metrics on the full dataset
+adata.var_names_make_unique()
+adata.obs["n_counts"] = adata.X.sum(axis=1).A1 if sc.sparse.issparse(adata.X) else adata.X.sum(axis=1)
+adata.obs["n_genes"] = (adata.X > 0).sum(axis=1).A1 if sc.sparse.issparse(adata.X) else (adata.X > 0).sum(axis=1)
+mt_mask = adata.var_names.str.upper().str.startswith("MT-")
+adata.obs["pct_mito"] = (adata[:, mt_mask].X.sum(axis=1).A1 if sc.sparse.issparse(adata.X) else adata[:, mt_mask].X.sum(axis=1)) / adata.obs["n_counts"] * 100
+
+# ------------------------------------------------------------------
+# 2. QC thresholds and subsetting to lymphocytes
+qc_mask = (
+    (adata.obs["n_genes"] >= 500) &
+    (adata.obs["n_genes"] <= 7500) &
+    (adata.obs["pct_mito"] <= 15)
+)
+lymphocytes_mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+combined_mask = qc_mask & lymphocytes_mask
+lymphocytes = adata[combined_mask].copy()
+print(f"QC-filtered lymphocytes: {lymphocytes.n_obs} cells retained")
+assert lymphocytes.n_obs > 0, "No cells left after QC filtering."
+
+# ------------------------------------------------------------------
+# 3. Preserve raw counts for downstream DE
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()
+
+# Ensure donor is string-typed (required by downstream batch correction)
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 4. Library-size normalisation & log1p transform
+sc.pp.normalize_total(lymphocytes, target_sum=1e4)
+sc.pp.log1p(lymphocytes)
+
+# ------------------------------------------------------------------
+# 5. Highly variable genes (Seurat v3 flavour)
+sc.pp.highly_variable_genes(
+    lymphocytes,
+    flavor="seurat_v3",
+    n_top_genes=2000,
+    batch_key="donor",
+    subset=False,
+)
+print(f"Selected {lymphocytes.var['highly_variable'].sum()} HVGs.")
+
+# ------------------------------------------------------------------
+# 6. Quick QC diagnostic plots (OPTIONAL, comment out for headless runs)
+fig, axes = plt.subplots(1, 3, figsize=(12, 3))
+axes[0].hist(lymphocytes.obs["n_genes"], bins=40, color="steelblue")
+axes[0].set_xlabel("n_genes")
+axes[1].hist(lymphocytes.obs["n_counts"], bins=40, color="orange")
+axes[1].set_xlabel("n_counts")
+axes[2].hist(lymphocytes.obs["pct_mito"], bins=40, color="seagreen")
+axes[2].set_xlabel("pct_mito")
+for ax in axes: ax.set_ylabel("cells")
+plt.tight_layout()
+plt.show()
+
+# ------------------------------------------------------------------
+# 7. Persist processed object for the next analysis steps (kept in memory here)
+print(f"Prepared AnnData object: {lymphocytes.n_obs} cells × {lymphocytes.n_vars} genes (raw counts preserved)")
+```
+
+
+================================================================================
+2025-05-18 23:14:29,930 - INFO
+================================================================================
+PROMPT: Incorporate Critiques (user)
+
+You will be given a hypothesis, analysis plan, and the python code for the first step in that analysis plan.
+You will also be given feedback for these components. Your role is to incorporate that feedback and update these components.
+
+Analysis Hypothesis:
+Endometrial lymphocytes undergo donor-independent transcriptional state transitions across the menstrual cycle that manifest as phase-specific shifts in cytotoxic NK-like subpopulations and a continuous pseudotemporal maturation trajectory.
+
+Analysis Plan:
+["Subset lymphocytes, select 2,000 highly-variable genes per donor, apply ComBat batch correction for donor effects, and compute a 30-component PCA embedding stored in obsm['X_lmpca'].", 'Build a kNN graph on the corrected PCA space (n_neighbors = 15), run Leiden clustering (resolution = 0.8, random_state = 0), generate a UMAP, and annotate clusters with CellTypist using the immune ‘Immune_All_Low.pkl’ model while keeping per-cell prediction probabilities.', 'Aggregate CellTypist-based subtypes per donor and menstrual phase (proliferative = 4–9, early-secretory = 10–14, mid-secretory = 15–19); test for directional changes with Cochran–Armitage trend tests and visualise with stacked barplots and donor-level dotplots.', 'Compute a cytotoxic gene signature score (GZMB, PRF1, NKG7, GNLY, KLRD1) per cell and compare score distributions across phases within each subtype using Kruskal-Wallis followed by Dunn post-hoc tests (BH-adjusted); display subtype-stratified violin plots overlaid with per-donor medians.', 'Within NK-predicted clusters, derive a diffusion pseudotime trajectory rooted in proliferative-phase cells, correlate pseudotime with cytotoxicity scores (Spearman), and visualise the relationship with a scatter/heat density plot to capture continuous activation dynamics.']
+
+Code for first step in analysis plan:
+import scanpy as sc
+import numpy as np
+
+# ---------------------------------------------------------------
+# 1. Isolate lymphocytes and ensure donor is treated as categorical
+mask = adata.obs['cell_type'].str.strip() == 'Lymphocytes'
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, 'No lymphocytes found.'
+lymphocytes.obs['donor'] = lymphocytes.obs['donor'].astype(str)
+
+# ---------------------------------------------------------------
+# 2. Highly variable gene selection per donor (2,000 genes total)
+sc.pp.highly_variable_genes(
+    lymphocytes,
+    flavor='seurat_v3',
+    n_top_genes=2000,
+    batch_key='donor',
+    subset=False,
+)
+
+# Keep only HVGs for efficiency
+lymphocytes = lymphocytes[:, lymphocytes.var['highly_variable']].copy()
+
+# ---------------------------------------------------------------
+# 3. Normalisation, log-transform, and donor-level ComBat correction
+sc.pp.normalize_total(lymphocytes, target_sum=1e4)
+sc.pp.log1p(lymphocytes)
+sc.pp.combat(lymphocytes, key='donor')  # removes donor-specific biases
+
+# ---------------------------------------------------------------
+# 4. Scaling and PCA (30 components)
+sc.pp.scale(lymphocytes, max_value=10)
+sc.tl.pca(lymphocytes, n_comps=30, svd_solver='arpack')
+lymphocytes.obsm['X_lmpca'] = lymphocytes.obsm['X_pca'].copy()
+
+print('Computed batch-corrected PCA; latent shape:', lymphocytes.obsm['X_lmpca'].shape)
+
+Feedback:
+Feedback on analysis plan
+• Scientific novelty: Focusing on lymphocyte state transitions is a nice departure from the epithelial/stromal emphasis of the paper, so the hypothesis is appropriate.
+
+• Feasibility within allowed packages:
+  – Cochran–Armitage trend test and Dunn’s post-hoc are not implemented in SciPy; you would need to hand-code these or replace with tests that exist (e.g., Cochran–Armitage can be coded in a few lines, but Dunn would require custom code or another multiple-comparison approach such as pair-wise Mann-Whitney with BH correction).
+  – CellTypist predictions are fine, but make sure the ‘Immune_All_Low.pkl’ file is already present or downloaded in the run; otherwise the analysis will break.
+  – Diffusion pseudotime is available (sc.tl.dpt), but rooting strictly in “proliferative‐phase cells” requires you to pass root cells/indices; spell this out.
+
+• Statistical design:
+  – Union of 2,000 HVGs per donor will exceed 2,000 genes; either specify “top 2,000 union capped at 2,000 after ranking by mean dispersion” or choose “intersection” for clarity.
+  – Consider including ‘day’ as a covariate in ComBat or regressing it later, otherwise the menstrual-phase signal could be dampened.
+  – Provide an explicit multiple-testing correction plan for the Kruskal-Wallis and Spearman correlations.
+
+• Visualisation: Stacked barplots and dotplots are good, but specify how you will normalise for unequal cell numbers per donor/phase.
+
+• Reproducibility: Define a random seed once and reuse; declare all key parameters (HVG flavour, n_neighbors, Leiden resolution, etc.) up front.
+
+Feedback on first-step python code
+Strengths
+✓ Correctly subsets lymphocytes and coerces donor to string.  
+✓ Uses Seurat-v3 HVG with batch_key, fulfilling the “per‐donor” requirement in principle.  
+✓ Performs ComBat and stores 30-PC embedding in obsm['X_lmpca'] as requested.
+
+Issues & suggestions
+1. HVG count: With batch_key, Scanpy concatenates the top n genes from each donor; resulting HVG set will likely exceed 2,000 ≠ analysis plan. After sc.pp.highly_variable_genes you should down-select to exactly 2,000 by ranking on ‘highly_variable_nbatches’ or ‘variance_normalized’.
+
+2. Data integrity:
+   – ComBat modifies .X in place. Preserve raw counts first:
+     lymphocytes.raw = lymphocytes.copy()
+   – ComBat expects linear counts; you applied log1p before calling it. Either call sc.pp.combat(log1p=True) (Scanpy ≥1.9) or run ComBat on the linear counts and log1p afterwards.
+
+3. Scaling after ComBat: Because ComBat can introduce negative values, scale(max_value=10) may clip many genes. Consider centering but not clipping (max_value=None) or scaling before ComBat.
+
+4. Metadata consistency: Add ‘phase’ column (proliferative / early-secretory / mid-secretory) now so downstream steps don’t have to recalculate.
+
+5. Code style / duplication: Later cells retrain scVI three times and reload adata, violating guideline 11 and introducing redundancy. Remove duplicates and avoid re-loading the AnnData object.
+
+6. Reproducibility: Set sc.settings.verbosity and figure params once at the top; include np.random.seed and sc.settings.set_figure_params as in later cells.
+
+7. Memory: Copying adata to .raw doubles memory; consider storing only counts layer instead (e.g. lymphocytes.layers['counts'] = lymphocytes.X.copy()).
+
+8. Documentation: Add inline comments clarifying why ComBat is run post-log or with log1p flag, and why 30 PCs chosen.
+
+If these adjustments are implemented, the preprocessing step will be robust and aligned with the stated analysis plan.
+
+Guidelines for constructing the analyses:
+    1. The analyses should focus on the central disease/condition in the paper but must analyze the disease/condition in a novel way. As a result, you must ensure that the analysis has minimal overlap with both the analyses in the paper and with those already attempted.
+    2. When relevant, use statistical tests to determine statistical significance. Ensure that you are printing the results of these
+    3. When relevant, create figures of your results. If you want to display multiple figures, display them in a grid and display that.
+    4. For analyses that depend on celltype, look at each celltype separately. Focus on the celltypes that you think will be most relevant.
+    5. For suggesting novel analyses not present in the paper, focus on using new computational methods, looking at new celltypes/genes/features, and finding new ways to visualize the dataset.
+    6. Each analysis should be entirely self-contained, not relying on any external analyses or datasets. It should be able to be run without changing anything.
+    7. You can only use the following Python packages: scanpy, scvi, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy. DO NOT USE ANY OTHER PACKAGES.
+    8. Make sure to only use data found in the anndata object. Take advantage of as much of the metadata information as possible.
+    9. The path to the anndata object is /scratch/users/salber/endo_data.h5ad
+    10. The analysis should be focused on one core goal/hypothesis. It should not branch out from this significantly. 
+    11. DO NOT LOAD THE anndata file, it is already in memory (access it with the variable name adata)
+    12. Display all figures. Never same them to a file.
+    13. The analyses should be standard and should be analyses you think the paper missed.
+
+Here is a summary of core single-cell analyses commonly done with the python libraries available to you:
+## Dimensionality Reduction
+Purpose: Embed high-dimensional gene expression into lower dimensions for visualization and analysis.
+
+Non-linear Embeddings: Further reduce to 2D/3D for visualization using t-SNE or UMAP. Scanpy provides sc.tl.umap(adata) (via UMAP) and sc.tl.tsne(adata). These use the neighborhood graph (see below) to embed cells so that similar cells cluster together. For example, after sc.pp.neighbors, call sc.tl.umap(adata). Alternative embeddings include diffusion map (sc.tl.diffmap) or force-directed graph (sc.tl.draw_graph), though the latter are less commonly used now.
+
+Latent Embedding (scVI): As an advanced dimensionality reduction, the SCVI model produces a probabilistic latent space. After training SCVI, extract latent = model.get_latent_representation() and store it (e.g. in adata.obsm['X_scVI']). These latent coordinates can be used instead of PCA for UMAP/t-SNE or clustering, often yielding better batch correction or representation of complex structure
+
+## Neighborhood Graph Construction
+Purpose: Build a k-nearest-neighbor graph of cells as input for clustering and visualization.
+sc.pp.neighbors: Compute the kNN graph on the chosen low-dimensional representation (PCA or latent) with sc.pp.neighbors(adata, n_neighbors=15, n_pcs=30). This populates adata.obsp['connectivities'] and adata.obsp['distances']. The graph defines edges between similar cells. Parameters include n_neighbors, distance metric, and which embedding to use (via use_rep or default PCA).
+Graph-based Refinements: Additional options allow customizing neighbor computation (e.g. method='umap' vs 'rapids-ann', etc.), but defaults suffice for most use cases. The neighbors graph underlies downstream UMAP/t-SNE and clustering. For example, sc.pp.neighbors(adata) is typically run before sc.tl.umap(adata)
+
+
+## Clustering
+Purpose: Identify groups of similar cells (e.g. cell types or states) in an unsupervised way.
+Leiden Algorithm: A common approach is to use community detection on the kNN graph. Scanpy’s sc.tl.leiden(adata, resolution=1.0, key_added='leiden') partitions cells into clusters (stored in adata.obs['leiden']). Leiden is an improved version of Louvain and requires the neighbors graph to be precomputed. The resolution parameter controls cluster granularity (higher → more clusters).
+Louvain Algorithm: Alternatively, use sc.tl.louvain(adata), which applies the Louvain method. It also depends on sc.pp.neighbors. Both algorithms label clusters in adata.obs.
+Cluster Options: Both Leiden and Louvain can be run with different seeds or restrictions (e.g. restrict_to a subset of obs categories). One can also iterate clustering at multiple resolutions to explore structure.
+Hierarchical Dendrogram (Optional): After clustering, Scanpy can build a dendrogram of cluster relationships with sc.tl.dendrogram(adata, groupby='leiden'), which stores a linkage in adata.uns and can be plotted with sc.pl.dendrogram. This helps interpret cluster similarities.
+Result: The output is a categorical label per cell (e.g. adata.obs['leiden']) representing inferred clusters/cell groups. These are often interpreted as putative cell types or subpopulations.
+
+
+## Trajectory and Pseudotime Analysis
+Purpose: Model continuous developmental or differentiation processes.
+Diffusion Pseudotime (DPT): Scanpy includes sc.tl.dpt(adata, n_dcs=10) to compute a diffusion-based pseudotemporal ordering. One must pick a “root” cell or cluster (often the presumed progenitor); DPT then assigns each cell a pseudotime (adata.obs['dpt_pseudotime']) based on diffusion distance from the root. This creates an ordering reflecting smooth transitions.
+Partition-based Graph Abstraction (PAGA): PAGA computes a coarse-grained connectivity graph between clusters. Using sc.tl.paga(adata, groups='leiden'), one obtains adata.uns['paga'], where edges between clusters have confidence weights. Plotting sc.pl.paga(adata, threshold=0.03) shows a simplified graph of cluster relations. PAGA can also be used to initialize UMAP (sc.tl.umap(adata, init_pos='paga')) for embeddings faithful to overall topology
+
+
+## Differential Expression and Marker Gene Detection
+Purpose: Identify genes that are characteristic of clusters or conditions.
+Rank Genes per Group: Use sc.tl.rank_genes_groups to perform marker analysis. Given adata.obs[groupby] (e.g. 'leiden'), this compares each group to others (or pairwise) and ranks genes by statistical tests. Methods include t-test, Welch’s t-test, Wilcoxon, or logistic regression (method='logreg'). For example, sc.tl.rank_genes_groups(adata, 'leiden', method='wilcoxon') fills adata.uns['rank_genes_groups'] with names, scores, p-values, and log-fold changes for top markers of each cluster. One can customize the test (e.g. method='logreg' for sparse markers). Results can be visualized with sc.pl.rank_genes_groups_heatmap or sc.pl.rank_genes_groups_dotplot.
+Logistic Regression (Alternative): Setting method='logreg' performs logistic regression classification for each gene (as in Ntranos et al., 2019). It often yields robust marker sets.
+SCVI Differential Expression: The trained SCVI model provides model.differential_expression, which can test for differentially expressed genes between groups of cells in a probabilistic framework. For example, model.differential_expression(groupby="cell_type", group1="A", group2="B") returns a dataframe of DE statistics. SCVI supports 1-vs-1 or 1-vs-all testing. This method accounts for model uncertainty and can be more powerful in large datasets.
+
+
+## Gene Signature Scoring
+Purpose: Quantify the expression of gene sets (e.g. cell-cycle genes, pathways) per cell.
+General Gene Set Scoring: sc.tl.score_genes(adata, gene_list, score_name="score") computes the average expression of a set of genes (minus average of random reference genes) for each cell. The result is added to adata.obs['score_name']. This can reflect pathway activity or other signatures.
+Cell-Cycle Scoring: A specialized function sc.tl.score_genes_cell_cycle(adata, s_genes, g2m_genes) takes lists of S-phase and G2M-phase marker genes and assigns each cell an S_score, G2M_score, and a categorical phase (G1, S, or G2M). This is useful to regress out or analyze cell-cycle effects.
+Options: Gene lists (e.g. provided with Scanpy, or user-defined) can be passed. The scoring considers control gene sets (by default) to normalize the scores. Cells are labeled by dominant phase if desired.
+
+## Visualization
+Purpose: Plot results (embeddings, marker expression, QC) to interpret data.
+Embedding Plots: sc.pl.umap(adata, color=[...]) or sc.pl.tsne(...) plot the 2D embedding, coloring points by cluster, sample, or gene expression. For example, sc.pl.umap(adata, color=['leiden', 'n_genes_by_counts']). sc.pl.draw_graph (force layout) and sc.pl.paga (PAGA graph) are also available. Many sc.pl functions return Matplotlib axes if show=False.
+QC and Metadata Plots: sc.pl.violin(adata, keys, ...) creates violin plots per group (e.g. distribution of counts or gene expression across clusters). In the QC tutorial, Scanpy shows violin plots of total counts and mitochondrial percentage. sc.pl.scatter(adata, x, y, color=...) makes 2D scatter (e.g. total_counts vs n_genes).
+Marker Gene Plots: Once clusters are defined, visualizing marker genes is key. Common plots include dotplots, heatmaps, and violin plots of cluster markers. For example, sc.pl.dotplot(adata, var_names, groupby='leiden') shows mean expression (color) and percent expressed (dot size) of selected genes per cluster. Similarly, sc.pl.matrixplot is a heatmap variant. The core plotting tutorial demonstrates dotplots and violin plots for cluster markers.
+Gene Expression Distributions: sc.pl.violin(adata, gene_list, groupby='leiden') and sc.pl.stacked_violin show the distribution of one or more genes across clusters.
+Clustered Heatmaps: sc.pl.heatmap can display expression of marker genes across clusters. sc.pl.clustermap (wrapper around Seaborn) can cluster cells/genes in a heatmap, often using raw or log counts.
+Pathway/Gene Set Plots: Custom heatmaps or barplots using Matplotlib/Seaborn can be made from gene scores or DE results (using Pandas/NumPy to extract data). Scanpy’s plots cover most scRNA needs, but any Matplotlib/Seaborn function can be used on data from adata.obs, adata.var, or adata.layers. For example, one might use sns.clustermap on a subset of adata.X.
+
+
+
+You are given the following summary of the anndata object:
+Below is a description of the columns in adata.obs: 
+Column cell_name contains the values ['14_AAACCCAAGTAATACG' '14_AAACCCAGTCCTTAAG' '14_AAACGAAAGGCGATAC'
+ '14_AAACGCTAGACTGTTC' '14_AAACGCTAGAGTGTTA' '14_AAACGCTAGTCTAGCT'
+ '14_AAACGCTGTTGTGGCC' '14_AAACGCTTCTTGCAGA' '14_AAAGAACAGCTCCGAC'
+ '14_AAAGAACAGGTACTGG'] 
+Column cell_type contains the values ['Ciliated' 'Endothelia' 'Lymphocytes' 'Macrophages' 'Smooth muscle cells'
+ 'Stromal fibroblasts' 'Unciliated epithelia' 'Unciliated epithelia 1'
+ 'Unciliated epithelia 2'] 
+Column dataset contains the values ['10x' 'C1'] 
+Column day contains the values [ 4  7  9 10 11 15 16 17 19 20] 
+Column donor contains the values [ 4  5  6  7  8 11 12 13 14 15] 
+
+
+Here is the code from the last 3 steps. Make sure the modified code builds on the past analyses and doesn't repeat any of them:
+
+import numpy as np
+import scanpy as sc
+import scvi
+
+# ------------------------------------------------------------------
+# Set global randomness for reproducibility
+np.random.seed(0)
+scvi.settings.seed = 0
+sc.settings.set_figure_params(dpi=80, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes and basic sanity checks
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found in the dataset."
+
+# Preserve raw counts for downstream differential expression
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()
+
+# Ensure donor is string-typed (required for scVI categorical handling)
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 2. scVI setup and model training (donor-batch correction)
+scvi.model.SCVI.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=20,
+    n_layers=2,
+)
+# Reduced epochs and patience to avoid long runtimes
+model.train(
+    max_epochs=50,
+    early_stopping=True,
+    early_stopping_patience=10,
+    check_val_every_n_epoch=1,
+)
+
+# ------------------------------------------------------------------
+# 3. Store the latent representation and model provenance
+lymphocytes.obsm["X_scVI_20d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "n_latent": 20,
+    "n_layers": 2,
+    "max_epochs": 50,
+    "seed": 0,
+    "batch_key": "donor",
+    "early_stopping": True,
+}
+
+print(f"Stored scVI latent with shape {lymphocytes.obsm['X_scVI_20d'].shape}")
+print(f"Final training ELBO: {model.history['elbo_train'].iloc[-1]:.2f}")
+
+
+# Next Cell
+
+import numpy as np
+import scanpy as sc
+import scvi
+
+# ------------------------------------------------------------------
+# Set global randomness for reproducibility
+np.random.seed(0)
+scvi.settings.seed = 0
+sc.settings.set_figure_params(dpi=80, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes and basic sanity checks
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found in the dataset."
+
+# Preserve raw counts for downstream differential expression
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()
+
+# Ensure donor is string-typed (required for scVI categorical handling)
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 2. scVI setup and model training (donor-batch correction)
+scvi.model.SCVI.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=20,
+    n_layers=2,
+)
+# Reduced epochs and patience to avoid long runtimes
+model.train(
+    max_epochs=50,
+    early_stopping=True,
+    early_stopping_patience=10,
+    check_val_every_n_epoch=1,
+)
+
+# ------------------------------------------------------------------
+# 3. Store the latent representation and model provenance
+lymphocytes.obsm["X_scVI_20d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "n_latent": 20,
+    "n_layers": 2,
+    "max_epochs": 50,
+    "seed": 0,
+    "batch_key": "donor",
+    "early_stopping": True,
+}
+
+print(f"Stored scVI latent with shape {lymphocytes.obsm['X_scVI_20d'].shape}")
+print(f"Final training ELBO: {model.history['elbo_train'].iloc[-1]:.2f}")
+
+
+# Next Cell
+
+import numpy as np
+import scanpy as sc
+import scvi
+
+# ------------------------------------------------------------------
+# Set global randomness for reproducibility
+np.random.seed(0)
+scvi.settings.seed = 0
+sc.settings.set_figure_params(dpi=80, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes and basic sanity checks
+mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found in the dataset."
+
+# Preserve raw counts for downstream differential expression
+if lymphocytes.raw is None:
+    lymphocytes.raw = lymphocytes.copy()
+
+# Ensure donor is string-typed (required for scVI categorical handling)
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 2. scVI setup and model training (donor-batch correction)
+scvi.model.SCVI.setup_anndata(lymphocytes, batch_key="donor")
+model = scvi.model.SCVI(
+    lymphocytes,
+    n_latent=20,
+    n_layers=2,
+)
+# Reduced epochs and patience to avoid long runtimes
+model.train(
+    max_epochs=50,
+    early_stopping=True,
+    early_stopping_patience=10,
+    check_val_every_n_epoch=1,
+    verbose=False,
+)
+
+# ------------------------------------------------------------------
+# 3. Store the latent representation and model provenance
+lymphocytes.obsm["X_scVI_20d"] = model.get_latent_representation()
+lymphocytes.uns["scvi_latent_info"] = {
+    "n_latent": 20,
+    "n_layers": 2,
+    "max_epochs": 50,
+    "seed": 0,
+    "batch_key": "donor",
+    "early_stopping": True,
+}
+
+print(f"Stored scVI latent with shape {lymphocytes.obsm['X_scVI_20d'].shape}")
+print(f"Final training ELBO: {model.history['elbo_train'].iloc[-1]:.2f}")
+
+
+# Next Cell
+import scanpy as sc
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+import warnings
+
+# Set up visualization defaults for better plots
+sc.settings.verbosity = 3  # verbosity: errors (0), warnings (1), info (2), hints (3)
+sc.settings.figsize = (8, 8)
+sc.settings.dpi = 100
+sc.settings.facecolor = 'white'
+warnings.filterwarnings('ignore')
+
+# Set Matplotlib and Seaborn styles for better visualization
+plt.rcParams['figure.figsize'] = (10, 8)
+plt.rcParams['savefig.dpi'] = 150
+sns.set_style('whitegrid')
+sns.set_context('notebook', font_scale=1.2)
+
+# Load data
+print("Loading data...")
+adata = sc.read_h5ad("/scratch/users/salber/endo_data.h5ad")
+print(f"Data loaded: {adata.shape[0]} cells and {adata.shape[1]} genes")
+
+
+
+================================================================================
+2025-05-18 23:14:29,933 - INFO
+================================================================================
+RESPONSE/OUTPUT: next_step
+
+Next step: Subset adata to lymphocytes, add a categorical ‘phase’ label from the numeric day (proliferative: 4–9, early-secretory: 10–14, mid-secretory: 15–19), store raw counts, select highly-variable genes per donor (Seurat-v3 flavour) and cap the union to the 2,000 most over-dispersed genes, normalise (CP10K), ComBat-correct donor effects on linear counts, log1p, scale (center only), compute 30-component PCA and save in obsm['X_lmpca'].
+
+Code:
+```python
+import scanpy as sc
+import numpy as np
+import pandas as pd
+
+# ------------------------------------------------------------------
+# Reproducibility & plotting defaults
+np.random.seed(0)
+sc.settings.verbosity = 2
+sc.settings.set_figure_params(dpi=90, facecolor="white")
+
+# ------------------------------------------------------------------
+# 1. Subset to lymphocytes
+ly_mask = adata.obs["cell_type"].str.strip() == "Lymphocytes"
+lymphocytes = adata[ly_mask].copy()
+assert lymphocytes.n_obs > 0, "No lymphocytes found."
+
+# ------------------------------------------------------------------
+# 2. Add explicit menstrual-phase annotation (needed downstream)
+phase_map = {"proliferative": range(4, 10),
+             "early_secretory": range(10, 15),
+             "mid_secretory": range(15, 20)}
+lymphocytes.obs["phase"] = pd.cut(
+    lymphocytes.obs["day"],
+    bins=[3, 9, 14, 19, 31],
+    labels=["proliferative", "early_secretory", "mid_secretory"],
+    right=True
+).astype(str)
+
+# ------------------------------------------------------------------
+# 3. Preserve raw counts economically
+if "counts" not in lymphocytes.layers:
+    lymphocytes.layers["counts"] = lymphocytes.X.copy()
+
+# Ensure categorical donor
+lymphocytes.obs["donor"] = lymphocytes.obs["donor"].astype(str)
+
+# ------------------------------------------------------------------
+# 4. Highly variable genes – donor aware, final cap = 2,000 genes
+sc.pp.highly_variable_genes(
+    lymphocytes,
+    flavor="seurat_v3",
+    n_top_genes=2000,
+    batch_key="donor",
+    subset=False,
+)
+# union may exceed 2k; rank by variance_normalized and keep top 2k
+hvg_ranked = (
+    lymphocytes.var[lymphocytes.var["highly_variable"]]
+    .sort_values("variance_normalized", ascending=False)
+    .head(2000)
+    .index
+)
+lymphocytes = lymphocytes[:, hvg_ranked].copy()
+
+# ------------------------------------------------------------------
+# 5. Normalise (CP10K), ComBat on linear counts, then log1p & scale
+sc.pp.normalize_total(lymphocytes, target_sum=1e4)
+sc.pp.combat(lymphocytes, key="donor")  # donor-specific bias removal
+sc.pp.log1p(lymphocytes)
+sc.pp.scale(lymphocytes, max_value=None)
+
+# ------------------------------------------------------------------
+# 6. PCA and storage
+sc.tl.pca(lymphocytes, n_comps=30, svd_solver="arpack", random_state=0)
+lymphocytes.obsm["X_lmpca"] = lymphocytes.obsm["X_pca"].copy()
+print("Batch-corrected PCA computed – shape:", lymphocytes.obsm["X_lmpca"].shape)
+```

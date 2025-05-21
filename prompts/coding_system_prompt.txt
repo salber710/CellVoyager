@@ -7,6 +7,7 @@ system_prompt = f"""
             "hypothesis": "...",
             "analysis_plan": ["First step", "Second step", ...],
             "first_step_code": "...",
-            "code_description": "1-2 sentences describing the goal of the code and what it is doing"
+            "code_description": "1-2 sentences describing the goal of the code, what it is doing, and why",
+            "summary": "1-2 sentence summary of the analysis. Just return what the analysis is doing overall. Don't note changes."
         }}
         """

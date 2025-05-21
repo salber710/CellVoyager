@@ -13,10 +13,11 @@ from logger import Logger
 import base64
 import h5py
 from h5py import Dataset, Group
+import re
 
-AVAILABLE_PACKAGES = "scanpy, scvi-tools, scVelo, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy"
+AVAILABLE_PACKAGES = "scanpy, scvi, CellTypist, anndata, matplotlib, numpy, seaborn, pandas, scipy"
 class AnalysisAgent:
-    def __init__(self, h5ad_path, paper_summary_path, openai_api_key, model_name, analysis_name, num_analyses=5, max_iterations=5, prompt_dir="prompts"):
+    def __init__(self, h5ad_path, paper_summary_path, openai_api_key, model_name, analysis_name, num_analyses=5, max_iterations=6, prompt_dir="prompts"):
         self.h5ad_path = h5ad_path
         self.paper_summary = open(paper_summary_path).read()
         self.openai_api_key = openai_api_key
@@ -28,19 +29,24 @@ class AnalysisAgent:
         
         self.completed_analyses = []
         self.failed_analyses = []
-        self.output_dir = "outputs"
+        # Create unique output directory based on analysis name and timestamp
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.output_dir = os.path.join("outputs", f"{analysis_name}_{timestamp}")
+        
         self.client = openai.OpenAI(api_key=openai_api_key)
         
         # Initialize code memory to track the last few cells of code
         self.code_memory = []
-        self.code_memory_size = 3  # Number of code cells to remember
+        self.code_memory_size = 5  # Number of code cells to remember
 
         # Create output directory if it doesn't exist
         os.makedirs(self.output_dir, exist_ok=True)
 
         # Coding guidelines: guide agent on how to write code and conduct analyses
+        analyses_overview = open(os.path.join(self.prompt_dir, "DeepResearch_Analyses.txt")).read()
         self.coding_guidelines = open(os.path.join(self.prompt_dir, "coding_guidelines.txt")).read()
-        self.coding_guidelines = self.coding_guidelines.format(name=self.analysis_name, adata_path=self.h5ad_path, available_packages=AVAILABLE_PACKAGES)
+        self.coding_guidelines = self.coding_guidelines.format(name=self.analysis_name, adata_path=self.h5ad_path, available_packages=AVAILABLE_PACKAGES,
+                                                               deepresearch_summary=analyses_overview)
 
         # System prompt for coding agents
         self.coding_system_prompt = open(os.path.join(self.prompt_dir, "coding_system_prompt.txt")).read()
@@ -57,12 +63,15 @@ class AnalysisAgent:
         self.executor = ExecutePreprocessor(timeout=600, kernel_name='python3')
 
         # Load the .obs data from the anndata file
-        print("Loading anndata .obs for summarization...")
-        self.adata_obs = self.load_h5ad_obs(self.h5ad_path)
-        self.adata_summary = self.summarize_adata_metadata()
-        print("ADATA SUMMARY: ", self.adata_summary)
-        self.logger.log_action("Data loaded and summarized", self.adata_summary)
-        print(f"✅ Loaded {self.h5ad_path}")
+        if self.h5ad_path == "": # JUST FOR BENCHMARKING
+            self.adata_summary = ""
+        else:
+            print("Loading anndata .obs for summarization...")
+            self.adata_obs = self.load_h5ad_obs(self.h5ad_path)
+            self.adata_summary = self.summarize_adata_metadata()
+            print("ADATA SUMMARY: ", self.adata_summary)
+            self.logger.log_action("Data loaded and summarized", self.adata_summary)
+            print(f"✅ Loaded {self.h5ad_path}")
         
 
 
@@ -408,11 +417,26 @@ class AnalysisAgent:
 
         return current_analysis
 
+    def create_ideas(self):
+        past_analyses = ""
+        analyses = []
+        for analysis_idx in range(self.num_analyses):
+            print(f"\n🚀 Starting Analysis {analysis_idx+1}")
+
+            analysis = self.generate_initial_analysis(past_analyses)
+
+            modified_analysis = self.get_feedback(analysis, past_analyses, None)
+            summary = modified_analysis["summary"]
+
+            past_analyses += f"{summary}\n"
+            analyses.append(summary)
+
+        return analyses
 
     def run(self, max_fix_attempts=3):
         past_analyses = ""
 
-        for analysis_idx in range(self.num_analyses):  # Try 5 analyses
+        for analysis_idx in range(self.num_analyses):
             # Reset code memory for this analysis
             self.code_memory = []
             
@@ -452,6 +476,7 @@ class AnalysisAgent:
                 notebook.cells.append(nbf.v4.new_markdown_cell(f"## {modified_analysis['code_description']}"))
             
             # Add the first analysis code cell
+            initial_code = strip_code_markers(initial_code)
             notebook.cells.append(nbf.v4.new_code_cell(initial_code))
 
             for iteration in range(self.max_iterations):
@@ -475,6 +500,7 @@ class AnalysisAgent:
                         print(f"  🔧 Fix attempt {fix_attempt}/{max_fix_attempts}")
 
                         current_code = self.fix_code(current_code, error_msg)
+                        current_code = strip_code_markers(current_code)
                         notebook.cells[-1] = nbf.v4.new_code_cell(current_code)
 
                         success, error_msg, notebook = self.execute_notebook(notebook, past_analyses)
@@ -516,7 +542,8 @@ class AnalysisAgent:
                 #analysis_step_plan = modified_analysis["analysis_plan"][0]
                 code_description = modified_analysis["code_description"]
                 notebook.cells.append(nbf.v4.new_markdown_cell(f"## {code_description}"))
-                notebook.cells.append(nbf.v4.new_code_cell(modified_analysis["first_step_code"]))
+                modified_code = strip_code_markers(modified_analysis["first_step_code"])
+                notebook.cells.append(nbf.v4.new_code_cell(modified_code))
                 
                 # Update the code memory with the new cell
                 self.update_code_memory(notebook.cells)
@@ -539,6 +566,7 @@ class AnalysisAgent:
                     print(f"  🔧 Fix attempt {fix_attempt}/{max_fix_attempts}")
 
                     current_code = self.fix_code(current_code, error_msg)
+                    current_code = strip_code_markers(current_code)
                     notebook.cells[-1] = nbf.v4.new_code_cell(current_code)
 
                     success, error_msg, notebook = self.execute_notebook(notebook, past_analyses)
@@ -678,6 +706,10 @@ print(f"Data loaded: {{adata.shape[0]}} cells and {{adata.shape[1]}} genes")
         except Exception as e:
             print(f"⚠️ Notebook execution failed: {str(e)}")
             return False, str(e), notebook
+
+def strip_code_markers(text):
+    # Remove ```python, ``` and ```
+    return re.sub(r'```python|```', '', text)
 
 
     

@@ -6,11 +6,12 @@ from notebook_generator import generate_notebook
 
 # Initialize the agent
 agent = AnalysisAgent(
-    h5ad_path="/scratch/users/salber/Single_cell_atlas_of_peripheral_immune_response_to_SARS_CoV_2_infection.h5ad",
-    paper_summary_path="/home/groups/jamesz/salber/scAgent/paper_summaries/covid19_pbmc.txt",
+    h5ad_path="/scratch/users/salber/endo_data.h5ad",
+    paper_summary_path="/home/groups/jamesz/salber/scAgent/paper_summaries/endo.txt",
     openai_api_key=os.getenv('OPENAI_API_KEY'),
-    model_name="o3-mini",
-    analysis_name="covid19"
+    model_name="o3",
+    analysis_name="endo",
+    num_analyses=8
 )
 
 # Run the analysis
